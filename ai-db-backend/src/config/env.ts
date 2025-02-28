@@ -1,12 +1,29 @@
 import dotenv from 'dotenv';
+import path from 'path';
 
-dotenv.config();
+// Ensure the correct path to .env file
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
-export const PORT = process.env.PORT || 3000;
-export const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret';
+const REQUIRED_ENV_VARS = [
+  'DB_HOST', 'DB_USER', 'DB_PASSWORD', 'DB_DATABASE', 
+  'JWT_SECRET', 'ENCRYPTION_KEY'
+];
 
-export const DB_HOST = process.env.DB_HOST || 'localhost';
-export const DB_PORT = process.env.DB_PORT ? parseInt(process.env.DB_PORT) : 5432;
-export const DB_USER = process.env.DB_USER || 'postgres';
-export const DB_PASSWORD = process.env.DB_PASSWORD || 'password';
-export const DB_DATABASE = process.env.DB_DATABASE || 'easydatabase';
+// Validate environment variables
+REQUIRED_ENV_VARS.forEach((envVar) => {
+  if (!process.env[envVar]) {
+    console.error(`❌ Missing required environment variable: ${envVar}`);
+    process.exit(1);
+  }
+});
+
+export const ENV = {
+  PORT: Number(process.env.PORT) || 3000,
+  JWT_SECRET: process.env.JWT_SECRET as string,
+  ENCRYPTION_KEY: process.env.ENCRYPTION_KEY as string,
+  DB_HOST: process.env.DB_HOST as string,
+  DB_PORT: Number(process.env.DB_PORT) || 5432,
+  DB_USER: process.env.DB_USER as string,
+  DB_PASSWORD: process.env.DB_PASSWORD as string,
+  DB_DATABASE: process.env.DB_DATABASE as string,
+};

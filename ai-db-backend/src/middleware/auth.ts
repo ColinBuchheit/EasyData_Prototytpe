@@ -1,27 +1,44 @@
 // src/middleware/auth.ts
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { JWT_SECRET } from '../config/env';
+import dotenv from 'dotenv';
+
+dotenv.config(); // Load environment variables
+
+const JWT_SECRET = process.env.JWT_SECRET;
+
+if (!JWT_SECRET) {
+  throw new Error("❌ JWT_SECRET is not set in environment variables!");
+}
 
 export interface AuthRequest extends Request {
   user?: any;
 }
 
 export const verifyToken = (req: AuthRequest, res: Response, next: NextFunction): void => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-
-  if (!token) {
-    res.status(401).json({ message: 'No token provided' });
-    return; // Return void explicitly
-  }
-
-  jwt.verify(token, JWT_SECRET, (err: Error | null, decoded: any) => {
-    if (err) {
-      res.status(401).json({ message: 'Unauthorized: Invalid token' });
-      return; // Return void explicitly
+  try {
+    const authHeader = req.headers['authorization'];
+    if (!authHeader) {
+      res.status(401).json({ message: '❌ No token provided' });
+      return;
     }
-    req.user = decoded;
-    next();
-  });
+
+    const token = authHeader.split(' ')[1];
+    if (!token) {
+      res.status(401).json({ message: '❌ Invalid token format' });
+      return;
+    }
+
+    jwt.verify(token, JWT_SECRET, (err, decoded) => {
+      if (err) {
+        res.status(401).json({ message: '❌ Unauthorized: Invalid token' });
+        return;
+      }
+      req.user = decoded;
+      next();
+    });
+  } catch (error) {
+    console.error('⚠️ Error verifying token:', error);
+    res.status(500).json({ message: '⚠️ Internal server error' });
+  }
 };

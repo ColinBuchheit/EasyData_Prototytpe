@@ -1,18 +1,25 @@
 import { Pool } from 'pg';
-import { DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_DATABASE } from './env';
+import { ENV } from './env';
 import logger from './logger';
 
 const pool = new Pool({
-  host: DB_HOST,
-  port: DB_PORT,
-  user: DB_USER,
-  password: DB_PASSWORD,
-  database: DB_DATABASE
+  host: ENV.DB_HOST,
+  port: ENV.DB_PORT,
+  user: ENV.DB_USER,
+  password: ENV.DB_PASSWORD,
+  database: ENV.DB_DATABASE,
+  max: 10, // Maximum number of connections in the pool
+  idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
+  connectionTimeoutMillis: 2000, // Wait 2 seconds before timing out
+});
+
+pool.on('connect', () => {
+  logger.info('✅ Database connected successfully.');
 });
 
 pool.on('error', (err) => {
-  logger.error('Unexpected error on idle client', err);
-  process.exit(-1);
+  logger.error('❌ Unexpected error on idle database client:', err);
+  process.exit(1);
 });
 
 export default pool;
