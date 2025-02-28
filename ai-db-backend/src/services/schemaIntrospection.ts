@@ -1,10 +1,10 @@
 // src/services/schemaIntrospection.ts
 
-import { Pool as PostgresPool } from 'pg';
-import mysql from 'mysql2/promise';
-import sql from 'mssql';
-import { Database as SQLiteDatabase } from 'sqlite';
-import logger from '../config/logger';
+import { Pool as PostgresPool } from "pg";
+import mysql from "mysql2/promise";
+import sql from "mssql";
+import { Database as SQLiteDatabase } from "sqlite";
+import logger from "../config/logger";
 
 // PostgreSQL Schema Introspection
 export const getPostgresSchema = async (pool: PostgresPool) => {
@@ -17,19 +17,21 @@ export const getPostgresSchema = async (pool: PostgresPool) => {
     `;
 
     const { rows } = await pool.query(query);
-    const schema: Record<string, { column: string; type: string }[]> = {};
+    if (!rows.length) {
+      logger.warn("⚠️ PostgreSQL schema is empty.");
+      return {};
+    }
 
+    const schema: Record<string, { column: string; type: string }[]> = {};
     rows.forEach((row) => {
-      if (!schema[row.table_name]) {
-        schema[row.table_name] = [];
-      }
+      schema[row.table_name] = schema[row.table_name] || [];
       schema[row.table_name].push({ column: row.column_name, type: row.data_type });
     });
 
-    logger.info('✅ PostgreSQL schema introspection completed.');
+    logger.info("✅ PostgreSQL schema introspection completed.");
     return schema;
   } catch (error) {
-    logger.error('❌ Error retrieving PostgreSQL schema:', error);
+    logger.error("❌ Error retrieving PostgreSQL schema:", error);
     throw error;
   }
 };
@@ -40,24 +42,25 @@ export const getMySQLSchema = async (pool: mysql.Pool) => {
     const query = `
       SELECT TABLE_NAME as table_name, COLUMN_NAME as column_name, DATA_TYPE as data_type
       FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_SCHEMA = DATABASE()
-      ORDER BY table_name, ordinal_position;
+      WHERE TABLE_SCHEMA = DATABASE();
     `;
 
     const [rows] = await pool.execute(query);
-    const schema: Record<string, { column: string; type: string }[]> = {};
+    if (!(rows as any[]).length) {
+      logger.warn("⚠️ MySQL schema is empty.");
+      return {};
+    }
 
+    const schema: Record<string, { column: string; type: string }[]> = {};
     (rows as any[]).forEach((row) => {
-      if (!schema[row.table_name]) {
-        schema[row.table_name] = [];
-      }
+      schema[row.table_name] = schema[row.table_name] || [];
       schema[row.table_name].push({ column: row.column_name, type: row.data_type });
     });
 
-    logger.info('✅ MySQL schema introspection completed.');
+    logger.info("✅ MySQL schema introspection completed.");
     return schema;
   } catch (error) {
-    logger.error('❌ Error retrieving MySQL schema:', error);
+    logger.error("❌ Error retrieving MySQL schema:", error);
     throw error;
   }
 };
@@ -67,24 +70,25 @@ export const getMSSQLSchema = async (pool: sql.ConnectionPool) => {
   try {
     const query = `
       SELECT TABLE_NAME as table_name, COLUMN_NAME as column_name, DATA_TYPE as data_type
-      FROM INFORMATION_SCHEMA.COLUMNS
-      ORDER BY table_name, ordinal_position;
+      FROM INFORMATION_SCHEMA.COLUMNS;
     `;
 
     const result = await pool.request().query(query);
-    const schema: Record<string, { column: string; type: string }[]> = {};
+    if (!result.recordset.length) {
+      logger.warn("⚠️ MSSQL schema is empty.");
+      return {};
+    }
 
+    const schema: Record<string, { column: string; type: string }[]> = {};
     result.recordset.forEach((row) => {
-      if (!schema[row.table_name]) {
-        schema[row.table_name] = [];
-      }
+      schema[row.table_name] = schema[row.table_name] || [];
       schema[row.table_name].push({ column: row.column_name, type: row.data_type });
     });
 
-    logger.info('✅ MSSQL schema introspection completed.');
+    logger.info("✅ MSSQL schema introspection completed.");
     return schema;
   } catch (error) {
-    logger.error('❌ Error retrieving MSSQL schema:', error);
+    logger.error("❌ Error retrieving MSSQL schema:", error);
     throw error;
   }
 };
@@ -92,25 +96,25 @@ export const getMSSQLSchema = async (pool: sql.ConnectionPool) => {
 // SQLite Schema Introspection
 export const getSQLiteSchema = async (db: SQLiteDatabase) => {
   try {
-    const query = `SELECT name FROM sqlite_master WHERE type='table';`;
-    const tables = await db.all(query);
+    const tables = await db.all(`SELECT name FROM sqlite_master WHERE type='table';`);
+    if (!tables.length) {
+      logger.warn("⚠️ SQLite schema is empty.");
+      return {};
+    }
+
     const schema: Record<string, { column: string; type: string }[]> = {};
-
     for (const table of tables) {
-      const tableName = table.name;
-      const columnsQuery = `PRAGMA table_info(${tableName});`;
-      const columns = await db.all(columnsQuery);
-
-      schema[tableName] = columns.map((col: any) => ({
+      const columns = await db.all(`PRAGMA table_info(${table.name});`);
+      schema[table.name] = columns.map((col: any) => ({
         column: col.name,
         type: col.type,
       }));
     }
 
-    logger.info('✅ SQLite schema introspection completed.');
+    logger.info("✅ SQLite schema introspection completed.");
     return schema;
   } catch (error) {
-    logger.error('❌ Error retrieving SQLite schema:', error);
+    logger.error("❌ Error retrieving SQLite schema:", error);
     throw error;
   }
 };

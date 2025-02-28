@@ -1,12 +1,11 @@
-// src/routes/users.routes.ts
-import { Router } from 'express';
-import { getAllUsers, getUserById, updateUser, deleteUser } from '../controllers/users.controller';
-import { verifyToken } from '../middleware/auth';
-import { authorizeRoles } from '../middleware/rbac';
+import { Router, Request, Response } from "express";
+import { getAllUsers, getUserById, updateUser, deleteUser } from "../controllers/users.controller";
+import { verifyToken, AuthRequest } from "../middleware/auth";
+import { authorizeRoles } from "../middleware/rbac";
 
 const router = Router();
 
-// All user routes require a valid JWT token.
+// ✅ Apply authentication to all user routes
 router.use(verifyToken);
 
 /**
@@ -16,161 +15,51 @@ router.use(verifyToken);
  *   description: User management endpoints
  */
 
-/**
- * @swagger
- * /api/users:
- *   get:
- *     summary: Retrieve all users (admin only)
- *     tags: [Users]
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: A list of users.
- *         content:
- *           application/json:
- *             schema:
- *               type: array
- *               items:
- *                 type: object
- *                 properties:
- *                   id:
- *                     type: number
- *                     example: 1
- *                   username:
- *                     type: string
- *                     example: "adminuser"
- *                   role:
- *                     type: string
- *                     example: "admin"
- *       500:
- *         description: Server error.
- */
-router.get('/', authorizeRoles(['admin']), getAllUsers);
+// ✅ Fix: Explicit return type for async functions (`Promise<void>`)
+router.get("/", authorizeRoles(["admin"]), async (req: Request, res: Response): Promise<void> => {
+  await getAllUsers(req, res);
+});
 
-/**
- * @swagger
- * /api/users/{id}:
- *   get:
- *     summary: Retrieve a specific user by ID
- *     tags: [Users]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         schema:
- *           type: string
- *         required: true
- *         description: The user ID.
- *     responses:
- *       200:
- *         description: User data.
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 id:
- *                   type: number
- *                   example: 1
- *                 username:
- *                   type: string
- *                   example: "adminuser"
- *                 role:
- *                   type: string
- *                   example: "admin"
- *       404:
- *         description: User not found.
- *       500:
- *         description: Server error.
- */
-router.get('/:id', authorizeRoles(['admin', 'user']), getUserById);
+// ✅ Fix: Use `AuthRequest` to ensure `req.user` exists
+router.get("/:id", authorizeRoles(["admin", "user"]), async (req: AuthRequest, res: Response): Promise<void> => {
+  const userId = req.params.id;
 
-/**
- * @swagger
- * /api/users/{id}:
- *   put:
- *     summary: Update a user's information (admin only)
- *     tags: [Users]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         description: The ID of the user to update.
- *         schema:
- *           type: string
- *     requestBody:
- *       description: Data to update for the user.
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               username:
- *                 type: string
- *                 example: "newusername"
- *               role:
- *                 type: string
- *                 example: "user"
- *     responses:
- *       200:
- *         description: User updated successfully.
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 id:
- *                   type: number
- *                   example: 1
- *                 username:
- *                   type: string
- *                   example: "newusername"
- *                 role:
- *                   type: string
- *                   example: "user"
- *       404:
- *         description: User not found.
- *       500:
- *         description: Server error.
- */
-router.put('/:id', authorizeRoles(['admin']), updateUser);
+  // ✅ Users can only access their own data unless they are admin
+  if (req.user.role !== "admin" && req.user.id !== Number(userId)) {
+    res.status(403).json({ error: "You are not allowed to view this profile." });
+    return;
+  }
 
-/**
- * @swagger
- * /api/users/{id}:
- *   delete:
- *     summary: Delete a user (admin only)
- *     tags: [Users]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         description: The ID of the user to delete.
- *         schema:
- *           type: string
- *     responses:
- *       200:
- *         description: User deleted successfully.
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 message:
- *                   type: string
- *                   example: "User deleted"
- *       404:
- *         description: User not found.
- *       500:
- *         description: Server error.
- */
-router.delete('/:id', authorizeRoles(['admin']), deleteUser);
+  await getUserById(req, res);
+});
+
+// ✅ Fix: Ensure function returns `Promise<void>`
+router.put("/:id", async (req: AuthRequest, res: Response): Promise<void> => {
+  const userId = req.params.id;
+  const { username, role } = req.body;
+
+  // ✅ Validate input fields
+  if (username && typeof username !== "string") {
+    res.status(400).json({ error: "Invalid username format." });
+    return;
+  }
+  if (role && !["user", "admin"].includes(role)) {
+    res.status(400).json({ error: "Invalid role." });
+    return;
+  }
+
+  // ✅ Users can only update their own profile unless they are admin
+  if (req.user.role !== "admin" && req.user.id !== Number(userId)) {
+    res.status(403).json({ error: "You can only update your own profile." });
+    return;
+  }
+
+  await updateUser(req, res);
+});
+
+// ✅ Fix: Ensure only admins can delete users
+router.delete("/:id", authorizeRoles(["admin"]), async (req: Request, res: Response): Promise<void> => {
+  await deleteUser(req, res);
+});
 
 export default router;

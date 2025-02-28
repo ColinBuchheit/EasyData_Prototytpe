@@ -1,8 +1,10 @@
-// src/routes/db.routes.ts
-import { Router, Request, Response } from 'express';
-import { ConnectionManager } from '../services/connectionmanager';
-import { verifyToken } from '../middleware/auth';
-import logger from '../config/logger';
+import { Router, Request, Response } from "express";
+import { ConnectionManager, DBConfig } from "../services/connectionmanager";
+import { verifyToken, requireRole } from "../middleware/auth";
+import logger from "../config/logger";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const router = Router();
 let connectionManager: ConnectionManager | null = null;
@@ -18,8 +20,10 @@ let connectionManager: ConnectionManager | null = null;
  * @swagger
  * /api/db/connect:
  *   post:
- *     summary: Connect to a database
+ *     summary: Connect to a database (Admin Only)
  *     tags: [Database]
+ *     security:
+ *       - BearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -30,93 +34,44 @@ let connectionManager: ConnectionManager | null = null;
  *               dbType:
  *                 type: string
  *                 enum: [postgres, mysql, mssql, sqlite]
- *               host:
- *                 type: string
- *               port:
- *                 type: integer
- *               user:
- *                 type: string
- *               password:
- *                 type: string
  *               database:
  *                 type: string
- *             required: [dbType, host, port, user, password, database]
  *     responses:
  *       200:
  *         description: Successfully connected to the database.
  *       400:
- *         description: Missing parameters.
+ *         description: Missing required parameters.
+ *       403:
+ *         description: Forbidden (Admins only).
  *       500:
  *         description: Database connection failed.
  */
-router.post('/connect', verifyToken, async (req: Request, res: Response) => {
+router.post("/connect", verifyToken, requireRole("admin"), async (req: Request, res: Response): Promise<void> => {
   try {
-    const { dbType, host, port, user, password, database } = req.body;
+    const { dbType, database } = req.body;
 
-    if (!dbType || !host || !user || !database) {
-      res.status(400).json({ message: '❌ Missing required parameters.' });
+    if (!dbType || !database) {
+      res.status(400).json({ message: "❌ Missing required parameters." });
       return;
     }
 
-    connectionManager = new ConnectionManager({ dbType, host, port, user, password, database });
+    // ✅ Ensure all required DBConfig properties are present
+    const dbConfig: DBConfig = {
+      dbType,
+      database,
+      host: process.env.DB_HOST || "localhost",
+      port: Number(process.env.DB_PORT) || 5432,
+      user: process.env.DB_USER || "default_user",
+      password: process.env.DB_PASSWORD || "default_password",
+    };
+
+    connectionManager = new ConnectionManager(dbConfig);
     await connectionManager.connect();
 
     res.json({ message: `✅ Connected to ${dbType} database successfully.` });
   } catch (error) {
-    logger.error('❌ Database connection failed:', error);
-    res.status(500).json({ message: 'Database connection failed', error: (error as Error).message });
-  }
-});
-
-/**
- * @swagger
- * /api/db/test-connection:
- *   post:
- *     summary: Test connection to a database
- *     tags: [Database]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               dbType:
- *                 type: string
- *                 enum: [postgres, mysql, mssql, sqlite]
- *               host:
- *                 type: string
- *               port:
- *                 type: integer
- *               user:
- *                 type: string
- *               password:
- *                 type: string
- *               database:
- *                 type: string
- *             required: [dbType, host, port, user, password, database]
- *     responses:
- *       200:
- *         description: Successfully tested database connection.
- *       500:
- *         description: Database connection test failed.
- */
-router.post('/test-connection', verifyToken, async (req: Request, res: Response) => {
-  try {
-    const { dbType, host, port, user, password, database } = req.body;
-    
-    connectionManager = new ConnectionManager({ dbType, host, port, user, password, database });
-    await connectionManager.connect();
-
-    res.json({ message: `✅ Connected to ${dbType} successfully.` });
-  } catch (error) {
-    logger.error('❌ Database connection test failed:', error);
-    res.status(500).json({ message: 'Database connection test failed', error: (error as Error).message });
-  } finally {
-    if (connectionManager) {
-      await connectionManager.disconnect();
-      connectionManager = null;
-    }
+    logger.error("❌ Database connection failed:", error);
+    res.status(500).json({ message: "Database connection failed", error: (error as Error).message });
   }
 });
 
@@ -124,8 +79,10 @@ router.post('/test-connection', verifyToken, async (req: Request, res: Response)
  * @swagger
  * /api/db/schema:
  *   get:
- *     summary: Retrieve database schema
+ *     summary: Retrieve database schema (Authenticated Users Only)
  *     tags: [Database]
+ *     security:
+ *       - BearerAuth: []
  *     responses:
  *       200:
  *         description: Successfully retrieved schema.
@@ -134,18 +91,18 @@ router.post('/test-connection', verifyToken, async (req: Request, res: Response)
  *       500:
  *         description: Failed to retrieve schema.
  */
-router.get('/schema', verifyToken, (req: Request, res: Response) => {
+router.get("/schema", verifyToken, async (req: Request, res: Response): Promise<void> => {
   try {
     if (!connectionManager) {
-      res.status(400).json({ message: '❌ No active database connection.' });
+      res.status(400).json({ message: "❌ No active database connection." });
       return;
     }
 
-    const schema = connectionManager.getSchema();
+    const schema = await connectionManager.getSchema();
     res.json({ schema });
   } catch (error) {
-    logger.error('❌ Failed to retrieve schema:', error);
-    res.status(500).json({ message: 'Failed to retrieve schema', error: (error as Error).message });
+    logger.error("❌ Failed to retrieve schema:", error);
+    res.status(500).json({ message: "Failed to retrieve schema", error: (error as Error).message });
   }
 });
 
@@ -153,8 +110,10 @@ router.get('/schema', verifyToken, (req: Request, res: Response) => {
  * @swagger
  * /api/db/disconnect:
  *   post:
- *     summary: Disconnect from the database
+ *     summary: Disconnect from the database (Admin Only)
  *     tags: [Database]
+ *     security:
+ *       - BearerAuth: []
  *     responses:
  *       200:
  *         description: Successfully disconnected from the database.
@@ -163,19 +122,19 @@ router.get('/schema', verifyToken, (req: Request, res: Response) => {
  *       500:
  *         description: Database disconnection failed.
  */
-router.post('/disconnect', verifyToken, async (req: Request, res: Response) => {
+router.post("/disconnect", verifyToken, requireRole("admin"), async (req: Request, res: Response): Promise<void> => {
   try {
     if (!connectionManager) {
-      res.status(400).json({ message: '❌ No active database connection to disconnect.' });
+      res.status(400).json({ message: "❌ No active database connection to disconnect." });
       return;
     }
 
     await connectionManager.disconnect();
     connectionManager = null;
-    res.json({ message: '✅ Database disconnected successfully.' });
+    res.json({ message: "✅ Database disconnected successfully." });
   } catch (error) {
-    logger.error('❌ Database disconnection failed:', error);
-    res.status(500).json({ message: 'Database disconnection failed', error: (error as Error).message });
+    logger.error("❌ Database disconnection failed:", error);
+    res.status(500).json({ message: "Database disconnection failed", error: (error as Error).message });
   }
 });
 

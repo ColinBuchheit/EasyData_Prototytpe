@@ -1,6 +1,7 @@
 // src/routes/auth.routes.ts
-import { Router } from 'express';
-import { login, register } from '../controllers/auth.controller';
+import { Router } from "express";
+import { login, register } from "../controllers/auth.controller";
+import rateLimit from "express-rate-limit";
 
 const router = Router();
 
@@ -10,6 +11,13 @@ const router = Router();
  *   name: Auth
  *   description: Authentication endpoints
  */
+
+// ✅ Rate limiter for login to prevent brute-force attacks
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // Limit each IP to 5 requests per windowMs
+  message: { error: "Too many login attempts, please try again later." }
+});
 
 /**
  * @swagger
@@ -36,17 +44,10 @@ const router = Router();
  *     responses:
  *       201:
  *         description: User registered successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 message:
- *                   type: string
- *                   example: "User registered successfully"
  *       400:
  *         description: User already exists or invalid input
  */
+router.post("/register", register);
 
 /**
  * @swagger
@@ -70,19 +71,9 @@ const router = Router();
  *     responses:
  *       200:
  *         description: Login successful
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 token:
- *                   type: string
- *                   example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
  *       401:
  *         description: Invalid credentials
  */
-
-router.post('/register', register);
-router.post('/login', login);
+router.post("/login", loginLimiter, login); // ✅ Added rate limiting
 
 export default router;
