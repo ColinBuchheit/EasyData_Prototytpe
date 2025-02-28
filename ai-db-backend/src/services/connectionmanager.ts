@@ -1,27 +1,27 @@
 // src/services/connectionManager.ts
-
-import logger from '../config/logger';
-import { Pool as PostgresPool } from 'pg';
-import mysql, { Pool as MySQLPool, Connection as MySQLConnection } from 'mysql2/promise';
-import sql, { ConnectionPool as MSSQLPool } from 'mssql';
-import { Database as SQLiteDatabase } from 'sqlite';
+import logger from "../config/logger";
+import { Pool as PostgresPool } from "pg";
+import mysql, { Pool as MySQLPool } from "mysql2/promise";
+import sql, { ConnectionPool as MSSQLPool } from "mssql";
+import { Database as SQLiteDatabase } from "sqlite";
 
 // Import database connection functions
-import { connectPostgres } from './dbDrivers/postgresDriver';
-import { connectMySQL } from './dbDrivers/mysqlDriver';
-import { connectMSSQL } from './dbDrivers/mssqlDriver';
-import { connectSQLite } from './dbDrivers/sqliteDriver';
+import { connectPostgres } from "./dbDrivers/postgresDriver";
+import { connectMySQL } from "./dbDrivers/mysqlDriver";
+import { connectMSSQL } from "./dbDrivers/mssqlDriver";
+import { connectSQLite } from "./dbDrivers/sqliteDriver";
 
 // Import schema introspection functions
-import { getPostgresSchema, getMySQLSchema, getMSSQLSchema, getSQLiteSchema } from './schemaIntrospection';
+import { getPostgresSchema, getMySQLSchema, getMSSQLSchema, getSQLiteSchema } from "./schemaIntrospection";
 
 export interface DBConfig {
-  dbType: 'postgres' | 'mysql' | 'mssql' | 'sqlite';
+  dbType: "postgres" | "mysql" | "mssql" | "sqlite";
   host: string;
   port: number;
   user: string;
   password: string;
   database: string;
+  maxConnections?: number; // ✅ Added connection pooling support
 }
 
 export class ConnectionManager {
@@ -31,9 +31,9 @@ export class ConnectionManager {
 
   constructor(config: DBConfig) {
     if (!config.dbType || !config.host || !config.user || !config.database) {
-      throw new Error('❌ Missing required database connection parameters.');
+      throw new Error("❌ Missing required database connection parameters.");
     }
-    this.config = config;
+    this.config = { ...config, maxConnections: config.maxConnections || 10 }; // ✅ Default max connections
   }
 
   /**
@@ -41,26 +41,32 @@ export class ConnectionManager {
    */
   public async connect(): Promise<void> {
     try {
+      if (this.isConnected()) {
+        logger.warn(`⚠️ Already connected to ${this.config.dbType}. Reusing existing connection.`);
+        return;
+      }
+
       switch (this.config.dbType) {
-        case 'postgres':
-          this.connection = await connectPostgres(this.config);
+        case "postgres":
+          this.connection = await connectPostgres({ ...this.config, maxConnections: this.config.maxConnections });
           this.schema = await getPostgresSchema(this.connection as PostgresPool);
           break;
-        case 'mysql':
-          this.connection = await connectMySQL(this.config); // Ensure it returns a pool
+        case "mysql":
+          this.connection = await connectMySQL({ ...this.config, maxConnections: this.config.maxConnections });
           this.schema = await getMySQLSchema(this.connection as MySQLPool);
           break;
-        case 'mssql':
-          this.connection = await connectMSSQL(this.config);
+        case "mssql":
+          this.connection = await connectMSSQL({ ...this.config, maxConnections: this.config.maxConnections });
           this.schema = await getMSSQLSchema(this.connection as MSSQLPool);
           break;
-        case 'sqlite':
+        case "sqlite":
           this.connection = await connectSQLite(this.config);
           this.schema = await getSQLiteSchema(this.connection as SQLiteDatabase);
           break;
         default:
           throw new Error(`❌ Database type ${this.config.dbType} is not supported.`);
       }
+
       logger.info(`✅ Successfully connected to ${this.config.dbType} database.`);
     } catch (error) {
       logger.error(`❌ Failed to connect to ${this.config.dbType} database:`, error);
@@ -74,25 +80,27 @@ export class ConnectionManager {
   public async disconnect(): Promise<void> {
     try {
       if (!this.connection) {
-        logger.warn('⚠️ No active database connection to disconnect.');
+        logger.warn("⚠️ No active database connection to disconnect.");
         return;
       }
+
       switch (this.config.dbType) {
-        case 'postgres':
+        case "postgres":
           await (this.connection as PostgresPool).end();
           break;
-        case 'mysql':
-          await (this.connection as MySQLPool).end(); // Use Pool, not Connection
+        case "mysql":
+          await (this.connection as MySQLPool).end();
           break;
-        case 'mssql':
+        case "mssql":
           await (this.connection as MSSQLPool).close();
           break;
-        case 'sqlite':
+        case "sqlite":
           await (this.connection as SQLiteDatabase).close();
           break;
         default:
           throw new Error(`❌ Database type ${this.config.dbType} is not supported.`);
       }
+
       logger.info(`✅ Disconnected from ${this.config.dbType} database.`);
       this.connection = null;
       this.schema = null;
@@ -107,7 +115,7 @@ export class ConnectionManager {
    */
   public getSchema(): Record<string, any> {
     if (!this.schema) {
-      throw new Error('❌ No schema available. Connect to a database first.');
+      throw new Error("❌ No schema available. Connect to a database first.");
     }
     return this.schema;
   }
@@ -117,5 +125,15 @@ export class ConnectionManager {
    */
   public isConnected(): boolean {
     return this.connection !== null;
+  }
+
+  /**
+   * Automatically reconnects if the connection is lost.
+   */
+  public async reconnect(): Promise<void> {
+    if (!this.isConnected()) {
+      logger.warn(`🔄 Attempting to reconnect to ${this.config.dbType} database...`);
+      await this.connect();
+    }
   }
 }
