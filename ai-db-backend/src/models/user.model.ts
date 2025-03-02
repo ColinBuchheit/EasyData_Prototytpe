@@ -2,6 +2,8 @@
 export interface User {
   id: number;
   username: string;
+  email: string;
   password_hash: string;
-  role: 'admin' | 'user' | 'read-only';
+  role: "admin" | "user" | "read-only";
+  created_at: Date;
 }

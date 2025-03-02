@@ -1,14 +1,10 @@
 // src/middleware/auth.ts
 import { Request, Response, NextFunction } from "express";
-import jwt from "jsonwebtoken";
-import dotenv from "dotenv";
+import jwt, { TokenExpiredError } from "jsonwebtoken";
+import { ENV } from "../config/env"; // ✅ Use centralized env loader
+import logger from "../config/logger";
 
-dotenv.config(); // Load environment variables
-
-const JWT_SECRET = process.env.JWT_SECRET;
-const BACKEND_SECRET = process.env.BACKEND_SECRET;
-
-if (!JWT_SECRET) {
+if (!ENV.JWT_SECRET) {
   throw new Error("❌ JWT_SECRET is not set in environment variables!");
 }
 
@@ -23,28 +19,38 @@ export const verifyToken = (req: AuthRequest, res: Response, next: NextFunction)
   try {
     const authHeader = req.headers["authorization"];
     if (!authHeader) {
+      logger.warn("⚠️ Unauthorized access attempt: No token provided");
       res.status(401).json({ message: "❌ No token provided" });
-      return; // ✅ Fix: Ensure function exits
+      return;
     }
 
     const token = authHeader.split(" ")[1];
     if (!token) {
+      logger.warn("⚠️ Unauthorized access attempt: Invalid token format");
       res.status(401).json({ message: "❌ Invalid token format" });
-      return; // ✅ Fix: Ensure function exits
+      return;
     }
 
-    jwt.verify(token, JWT_SECRET, (err, decoded) => {
+    jwt.verify(token, ENV.JWT_SECRET, (err, decoded) => {
       if (err) {
-        res.status(401).json({ message: "❌ Unauthorized: Invalid token" });
-        return; // ✅ Fix: Ensure function exits
+        if (err instanceof TokenExpiredError) {
+          logger.warn("⚠️ Token expired: Reauthentication required.");
+          res.status(401).json({ message: "❌ Token expired, please log in again." });
+        } else {
+          logger.error("❌ Unauthorized: Invalid token", err.message);
+          res.status(401).json({ message: "❌ Unauthorized: Invalid token" });
+        }
+        return;
       }
+
       req.user = decoded;
+      logger.info(`✅ User ${req.user.id} successfully authenticated`);
       next();
     });
-  } catch (error) {
-    console.error("⚠️ Error verifying token:", error);
+  } catch (error: unknown) {
+    const err = error as Error;
+    logger.error("⚠️ Error verifying token:", err.message);
     res.status(500).json({ message: "⚠️ Internal server error" });
-    return; // ✅ Fix: Ensure function exits
   }
 };
 
@@ -54,9 +60,11 @@ export const verifyToken = (req: AuthRequest, res: Response, next: NextFunction)
 export const requireRole = (role: string) => {
   return (req: AuthRequest, res: Response, next: NextFunction): void => {
     if (!req.user || req.user.role !== role) {
+      logger.warn(`🚫 Access Denied: User ${req.user?.id || "unknown"} attempted restricted action`);
       res.status(403).json({ message: "❌ Forbidden: Insufficient permissions" });
-      return; // ✅ Fix: Ensure function exits
+      return;
     }
+    logger.info(`✅ Role validation passed: User ${req.user.id} has role ${req.user.role}`);
     next();
   };
 };
@@ -65,12 +73,14 @@ export const requireRole = (role: string) => {
  * Middleware to verify backend-to-AI-Agent communication using `BACKEND_SECRET`
  */
 export const verifyBackendRequest = (req: Request, res: Response, next: NextFunction): void => {
-  const requestSecret = req.headers["request_secret"];
-  
-  if (requestSecret !== BACKEND_SECRET) {
+  const requestSecret = req.headers["request_secret"] as string;
+
+  if (!requestSecret || requestSecret !== ENV.BACKEND_SECRET) {
+    logger.warn("⚠️ Unauthorized backend request detected");
     res.status(403).json({ message: "❌ Unauthorized: Backend secret invalid" });
-    return; // ✅ Fix: Ensure function exits
+    return;
   }
 
+  logger.info("✅ Backend request authenticated successfully");
   next();
 };

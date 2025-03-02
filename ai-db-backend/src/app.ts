@@ -1,62 +1,59 @@
-// src/app.ts
-import express, { Application } from "express";
-import cors from "cors";
+import express, { Request, Response, NextFunction } from "express";
 import helmet from "helmet";
+import cors from "cors";
 import morgan from "morgan";
-import logger from "./config/logger";
-
-// Swagger imports
 import swaggerUi from "swagger-ui-express";
+import rateLimit from "express-rate-limit";
+import logger from "./config/logger";
 import swaggerSpec from "./config/swagger";
+import { ENV } from "./config/env";
+import pool from "./config/db"; // ✅ Database connection for cleanup
 
-// Import routes
+// ✅ Import API Routes
 import authRoutes from "./routes/auth.routes";
-import usersRoutes from "./routes/user.routes";
+import userRoutes from "./routes/user.routes";
 import queryRoutes from "./routes/query.routes";
-import aiQueryRoutes from "./routes/query.routes"; // ✅ Ensure AI queries are handled
+import userdbRoutes from "./routes/userdb.routes";
+import dbRoutes from "./routes/db.routes";
 
-const app: Application = express();
+const app = express();
 
-// ✅ Security middleware should be loaded before request processing
+// ✅ Security Middleware
 app.use(helmet());
 app.use(cors());
+app.use(express.json({ limit: "5mb" })); // ✅ Prevent large payloads
+app.use(morgan("combined"));
 
-// ✅ Enable JSON & URL encoding (body parsing)
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
+// ✅ API Rate Limiting (Prevents API abuse)
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per window
+  message: { error: "Too many requests, please try again later." },
+});
+app.use("/api", apiLimiter);
 
-// ✅ Logging middleware
-app.use(
-  morgan("combined", {
-    stream: { write: (message: string) => logger.info(message.trim()) },
-  })
-);
-
-// ✅ Swagger UI setup
+// ✅ Swagger API Documentation
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
-// ✅ Register API routes
+// ✅ Register API Routes
 app.use("/api/auth", authRoutes);
-app.use("/api/users", usersRoutes);
+app.use("/api/users", userRoutes);
 app.use("/api/query", queryRoutes);
-app.use("/api/ai-query", aiQueryRoutes); // ✅ AI query endpoint is explicitly registered
+app.use("/api/databases", userdbRoutes);
+app.use("/api/db", dbRoutes);
 
-// ✅ Global Error Handling
-app.use(
-  (
-    err: any,
-    req: express.Request,
-    res: express.Response,
-    next: express.NextFunction
-  ) => {
-    logger.error(err);
+// ✅ Global Error Handling Middleware (Fixed TypeScript Issues)
+app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
+  logger.error(`❌ Error: ${err.message}`);
+  res.status(500).json({ error: err.message || "Internal Server Error" });
+});
 
-    if (err.status) {
-      res.status(err.status).json({ message: err.message });
-    } else {
-      res.status(500).json({ message: "An internal server error occurred" });
-    }
-  }
-);
+// ✅ Graceful Shutdown Handling
+process.on("SIGINT", async () => {
+  logger.info("⚠️ Shutting down server...");
+  await pool.end(); // ✅ Closes database connections
+  logger.info("✅ Database connections closed.");
+  process.exit(0);
+});
 
 export default app;

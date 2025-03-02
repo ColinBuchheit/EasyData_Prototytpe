@@ -1,24 +1,15 @@
 // src/services/dbDrivers/mysqlDriver.ts
-import mysql from 'mysql2/promise';
+import { requestDatabaseSession } from '../ai.service'; // ✅ AI-Agent Session Handling
 import logger from '../../config/logger';
-import { DBConfig } from '../connectionmanager';
 
-export const connectMySQL = async (config: DBConfig) => {
+export const connectMySQL = async (userId: number, dbType: string) => {
   try {
-    const connection = await mysql.createPool({
-      host: config.host,
-      port: config.port,
-      user: config.user,
-      password: config.password,
-      database: config.database,
-      connectionLimit: 10,
-    });
-    // Test the connection:
-    await connection.query('SELECT 1');
-    logger.info('MySQL connection established.');
-    return connection;
+    // ✅ Request an AI-Agent session instead of using credentials
+    const session = await requestDatabaseSession(userId, dbType, "session"); // ✅ Specify session-based access
+    logger.info(`✅ AI-Agent MySQL session established. Session Token: ${session.sessionToken}`);
+    return session;
   } catch (error) {
-    logger.error('Failed to connect to MySQL', error);
+    logger.error('❌ Failed to create MySQL session via AI-Agent:', error);
     throw error;
   }
 };

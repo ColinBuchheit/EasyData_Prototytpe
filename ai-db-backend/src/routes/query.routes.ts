@@ -1,6 +1,7 @@
-import { Router, Request, Response } from "express";
-import { fetchAIQuery } from "../services/ai.service";
-import { verifyToken } from "../middleware/auth";
+import { Router, Response } from "express";
+import { executeAIQuery } from "../services/ai.service"; // ✅ AI-Agent Query Execution
+import { verifyToken, AuthRequest } from "../middleware/auth"; // ✅ Correct request type
+import { getSession } from "../services/dbSession.service"; // ✅ Validate sessions before executing queries
 import rateLimit from "express-rate-limit";
 import logger from "../config/logger";
 
@@ -17,60 +18,52 @@ const queryLimiter = rateLimit({
  * @swagger
  * /api/ai-query:
  *   post:
- *     summary: Process AI-generated SQL queries
+ *     summary: Execute a query via AI-Agent using a session token
  *     tags: [AI Queries]
- *     security:
- *       - BearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               user_query:
- *                 type: string
- *                 example: "How many users signed up last month?"
- *     responses:
- *       200:
- *         description: AI-generated SQL query
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 sql_query:
- *                   type: string
- *                   example: "SELECT COUNT(*) FROM users WHERE signup_date >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month');"
- *       400:
- *         description: Bad request (missing or invalid input)
- *       403:
- *         description: Unauthorized (User not logged in)
- *       429:
- *         description: Too many requests (Rate limit exceeded)
- *       500:
- *         description: Internal server error
  */
-router.post("/ai-query", verifyToken, queryLimiter, async (req: Request, res: Response): Promise<void> => {
+router.post("/ai-query", verifyToken, queryLimiter, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    let { user_query } = req.body;
+    const { user_query, sessionToken } = req.body;
 
     if (!user_query || typeof user_query !== "string") {
-      logger.warn("⚠️ Invalid AI Query Attempt");
-      res.status(400).json({ error: "Missing or invalid user query." });
+      res.status(400).json({ error: "❌ Missing or invalid query input." });
       return;
     }
 
-    // ✅ Sanitize input to prevent SQL injection attempts
-    user_query = user_query.replace(/['";]/g, ""); 
+    if (!sessionToken || typeof sessionToken !== "string") {
+      res.status(400).json({ error: "❌ Missing or invalid session token." });
+      return;
+    }
 
-    logger.info(`🔍 AI Query Received: ${user_query}`);
+    // ✅ Validate session before executing query
+    const session = await getSession(req.user.id, sessionToken);
+    if (!session) {
+      res.status(403).json({ error: "❌ Invalid or expired session token." });
+      return;
+    }
 
-    const sqlQuery = await fetchAIQuery(user_query);
+    // ✅ Enhanced input validation to prevent SQL Injection
+    const sanitizedQuery = user_query.replace(/[^a-zA-Z0-9 _-]/g, "").trim();
+
+    if (sanitizedQuery.length < 3) {
+      res.status(400).json({ error: "❌ Query too short." });
+      return;
+    }
+
+    logger.info(`🔍 Processing AI query request: ${sanitizedQuery}`);
+
+    // ✅ Fetch AI-generated SQL query
+    const sqlQuery = await executeAIQuery(sanitizedQuery, sessionToken);
+
+    if (!sqlQuery || typeof sqlQuery !== "string") {
+      throw new Error("AI service returned an invalid response.");
+    }
+
     res.json({ sql_query: sqlQuery });
-  } catch (error) {
-    logger.error("❌ AI Query Processing Failed:", error);
-    res.status(500).json({ error: "Failed to process query." });
+  } catch (error: unknown) {
+    const err = error as Error; // ✅ Explicitly cast `error` to `Error`
+    logger.error("❌ AI Query Processing Failed:", err.message);
+    res.status(500).json({ error: "Failed to process query.", details: err.message });
   }
 });
 

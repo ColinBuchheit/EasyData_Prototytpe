@@ -10,11 +10,13 @@ const IV = crypto.randomBytes(16);
  * @returns Encrypted text in base64 format.
  */
 export const encrypt = (text: string): string => {
-  const cipher = crypto.createCipheriv(ALGORITHM, Buffer.from(SECRET_KEY, 'hex'), IV);
+  const iv = crypto.randomBytes(16); // ✅ Generate a new IV per encryption
+  const cipher = crypto.createCipheriv(ALGORITHM, Buffer.from(SECRET_KEY, 'hex'), iv);
   let encrypted = cipher.update(text, 'utf8', 'hex');
   encrypted += cipher.final('hex');
-  return `${IV.toString('hex')}:${encrypted}`;
+  return `${iv.toString('hex')}:${encrypted}`;
 };
+
 
 /**
  * Decrypts an encrypted text.

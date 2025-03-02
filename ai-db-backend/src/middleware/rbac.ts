@@ -15,7 +15,7 @@ export const authorizeRoles = (roles: string[], allowAdminOverride = true) => {
 
     // ✅ Allow admin override if enabled
     if (allowAdminOverride && userRole === "admin") {
-      logger.info(`✅ Admin override access granted for ${req.user.id} to ${req.originalUrl}`);
+      logger.info(`✅ Admin override access granted for User ${req.user.id} to ${req.originalUrl}`);
       return next();
     }
 
@@ -26,7 +26,7 @@ export const authorizeRoles = (roles: string[], allowAdminOverride = true) => {
       return;
     }
 
-    logger.info(`✅ Access granted for ${req.user.id} (${userRole}) to ${req.originalUrl}`);
+    logger.info(`✅ Access granted for User ${req.user.id} (${userRole}) to ${req.originalUrl}`);
     next();
   };
 };

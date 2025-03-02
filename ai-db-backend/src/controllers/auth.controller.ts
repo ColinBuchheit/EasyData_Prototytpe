@@ -4,6 +4,7 @@ import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
 import { ENV } from "../config/env";
 import { registerUser, findUserByUsername } from "../services/user.service";
+import logger from "../config/logger";
 
 /**
  * Register a new user.
@@ -50,7 +51,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
   try {
     const { username, password } = req.body;
 
-    // ✅ Validate input
+    // Validate input
     if (!username || typeof username !== "string") {
       res.status(400).json({ message: "❌ Invalid username format." });
       return;
@@ -60,37 +61,26 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    console.log("🔍 Login attempt for user:", username);
-
     // Find user by username
     const user = await findUserByUsername(username);
     if (!user) {
-      console.log("❌ User not found in database:", username);
       res.status(401).json({ message: "❌ Invalid credentials" });
       return;
     }
-
-    console.log("🔍 Retrieved user from DB:", user);
-    console.log("🔍 Entered password:", password);
-    console.log("🔍 Stored hash from DB:", user.password_hash);
 
     // Validate password
     const passwordValid = await bcrypt.compare(password, user.password_hash);
-    console.log("🔍 Password match result:", passwordValid);
-
     if (!passwordValid) {
-      console.log("❌ Password does not match.");
       res.status(401).json({ message: "❌ Invalid credentials" });
       return;
     }
 
-    // ✅ Generate JWT token
+    // ✅ Generate JWT token securely
     const token = jwt.sign({ id: user.id, role: user.role }, ENV.JWT_SECRET, { expiresIn: "1h" });
 
-    console.log("✅ Login successful, token generated.");
     res.json({ message: "✅ Login successful", token });
   } catch (error) {
-    console.error("❌ Error logging in:", error);
+    logger.error("❌ Error logging in:", error);
     res.status(500).json({ message: "Error logging in" });
   }
 };
