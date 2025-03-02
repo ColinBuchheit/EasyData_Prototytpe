@@ -1,27 +1,15 @@
 // src/services/dbDrivers/postgresDriver.ts
-import { Pool, PoolConfig } from 'pg';
+import { requestDatabaseSession } from '../ai.service'; // ✅ AI-Agent Session Handling
 import logger from '../../config/logger';
-import { DBConfig } from '../connectionmanager';
 
-export const connectPostgres = async (config: DBConfig): Promise<Pool> => {
-  const poolConfig: PoolConfig = {
-    host: config.host,
-    port: config.port,
-    user: config.user,
-    password: config.password,
-    database: config.database,
-    max: 10,
-    idleTimeoutMillis: 30000,
-  };
-
-  const pool = new Pool(poolConfig);
+export const connectPostgres = async (userId: number, dbType: string) => {
   try {
-    const client = await pool.connect();
-    client.release();
-    logger.info('PostgreSQL connection established.');
+    // ✅ Request an AI-Agent session instead of using credentials
+    const session = await requestDatabaseSession(userId, dbType, "session"); // ✅ Specify session-based access
+    logger.info(`✅ AI-Agent PostgreSQL session established. Session Token: ${session.sessionToken}`);
+    return session;
   } catch (error) {
-    logger.error('Failed to connect to PostgreSQL', error);
+    logger.error('❌ Failed to create PostgreSQL session via AI-Agent:', error);
     throw error;
   }
-  return pool;
 };

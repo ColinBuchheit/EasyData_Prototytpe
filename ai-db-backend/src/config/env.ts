@@ -2,17 +2,17 @@
 import dotenv from "dotenv";
 import path from "path";
 
-// Ensure the correct path to .env file dynamically
+// ✅ Ensure the correct path to .env file dynamically
 dotenv.config({ path: path.resolve(process.cwd(), ".env") });
 
-// Required environment variables
+// ✅ List required environment variables
 const REQUIRED_ENV_VARS = [
-  "DB_HOST", "DB_USER", "DB_PASSWORD", "DB_DATABASE", 
+  "DB_HOST", "DB_USER", "DB_PASSWORD", "DB_DATABASE", "DB_TYPE",
   "JWT_SECRET", "ENCRYPTION_KEY",
   "AI_AGENT_API", "AI_API_KEY", "BACKEND_SECRET"
 ];
 
-// Validate required environment variables
+// ✅ Validate required environment variables
 REQUIRED_ENV_VARS.forEach((envVar) => {
   if (!process.env[envVar]) {
     console.error(`❌ Missing required environment variable: ${envVar}`);
@@ -29,8 +29,7 @@ export const ENV = {
   DB_USER: process.env.DB_USER as string,
   DB_PASSWORD: process.env.DB_PASSWORD as string,
   DB_DATABASE: process.env.DB_DATABASE as string,
-  
-  // AI Agent Network Config
+  DB_TYPE: process.env.DB_TYPE as string, // ✅ Ensuring DB_TYPE is required
   AI_AGENT_API: process.env.AI_AGENT_API as string,
   AI_API_KEY: process.env.AI_API_KEY as string,
   BACKEND_SECRET: process.env.BACKEND_SECRET as string

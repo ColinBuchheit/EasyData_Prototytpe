@@ -1,54 +1,93 @@
 import axios from "axios";
-import dotenv from "dotenv";
 import logger from "../config/logger";
+import { ENV } from "../config/env"; // ✅ Use centralized env loader
 
-dotenv.config();
-
-const AI_AGENT_API = process.env.AI_AGENT_API || "http://localhost:8001/query";
-const AI_API_KEY = process.env.AI_API_KEY || "your-secure-api-key";
-const BACKEND_SECRET = process.env.BACKEND_SECRET || "backend-secure-token";
+const MAX_RETRIES = 3;
+const BACKOFF_DELAY = 2000; // 2 seconds
 
 /**
- * Sends a user question to the AI Agent Network and retrieves an SQL query.
- * @param {string} userQuery - The natural language question from the user.
- * @returns {Promise<string>} - The AI-generated SQL query.
+ * Makes a request to the AI-Agent Network.
+ * Implements retries with exponential backoff.
+ * @param {string} endpoint - The AI-Agent endpoint to call.
+ * @param {any} payload - The request body payload.
+ * @returns {Promise<any>} - The AI response.
  */
-export async function fetchAIQuery(userQuery: string): Promise<string> {
-  try {
-    // ✅ Validate input before sending the request
-    if (!userQuery || typeof userQuery !== "string" || userQuery.length < 3) {
-      throw new Error("Invalid user query: Query must be a non-empty string with at least 3 characters.");
-    }
+async function requestAI(endpoint: string, payload: any): Promise<any> {
+  let attempt = 0;
+  while (attempt < MAX_RETRIES) {
+    try {
+      const response = await axios.post(
+        `${ENV.AI_AGENT_API}/${endpoint}`,
+        payload,
+        {
+          headers: {
+            "Content-Type": "application/json",
+            "api_key": ENV.AI_API_KEY,
+            "request_secret": ENV.BACKEND_SECRET,
+          },
+        }
+      );
 
-    logger.info(`🔍 Sending AI Query: ${userQuery}`);
-
-    const response = await axios.post(
-      AI_AGENT_API,
-      { user_query: userQuery },
-      {
-        headers: {
-          "Content-Type": "application/json",
-          "api_key": AI_API_KEY,
-          "request_secret": BACKEND_SECRET,
-        },
+      if (response.data) {
+        logger.info(`✅ AI-Agent Response from ${endpoint}:`, response.data);
+        return response.data;
+      } else {
+        throw new Error("Invalid AI-Agent response.");
       }
-    );
-
-    if (response.data.sql_query) {
-      logger.info(`✅ AI Query Processed Successfully: ${response.data.sql_query}`);
-      return response.data.sql_query;
-    } else {
-      throw new Error("AI Agent did not return a valid SQL query.");
-    }
-  } catch (error: unknown) {
-    if (axios.isAxiosError(error)) {
-      logger.error(`❌ AI Query API Error: ${error.response?.status} - ${error.response?.data}`);
-      throw new Error(`Failed to generate SQL query: ${error.response?.data || "Unknown error"}`);
-    } else if (error instanceof Error) {
-      logger.error("❌ AI Query Processing Error:", error.message);
-      throw new Error("Failed to generate SQL query: " + error.message);
-    } else {
-      throw new Error("An unknown error occurred while processing the AI query.");
+    } catch (error) {
+      attempt++;
+      if (attempt >= MAX_RETRIES) {
+        logger.error(`❌ AI-Agent call failed after ${MAX_RETRIES} attempts.`);
+        throw error;
+      }
+      logger.warn(`⚠️ AI-Agent call to ${endpoint} failed (Attempt ${attempt}). Retrying...`);
+      await new Promise((resolve) => setTimeout(resolve, BACKOFF_DELAY * attempt));
     }
   }
+}
+
+/**
+ * Requests a database session from AI-Agent using either session-based or stored credentials.
+ */
+export async function requestDatabaseSession(
+  userId: number,
+  dbType: string,
+  authMethod: string,
+  host?: string,
+  port?: number,
+  username?: string,
+  password?: string
+): Promise<any> {
+  const payload: any = { userId, dbType, authMethod };
+
+  // ✅ If using stored authentication, send credentials securely
+  if (authMethod === "stored" && host && port && username && password) {
+    payload.host = host;
+    payload.port = port;
+    payload.username = username;
+    payload.password = password;
+  }
+
+  return await requestAI("request-session", payload);
+}
+
+/**
+ * Retrieves the database schema using an active session token.
+ */
+export async function fetchDatabaseSchema(sessionToken: string): Promise<any> {
+  return await requestAI("fetch-schema", { sessionToken });
+}
+
+/**
+ * Executes a query via the AI-Agent Network using an active session.
+ */
+export async function executeAIQuery(userQuery: string, sessionToken: string): Promise<any> {
+  return await requestAI("execute-query", { userQuery, sessionToken });
+}
+
+/**
+ * Disconnects a database session via AI-Agent.
+ */
+export async function disconnectDatabaseSession(sessionToken: string): Promise<any> {
+  return await requestAI("disconnect-database", { sessionToken });
 }

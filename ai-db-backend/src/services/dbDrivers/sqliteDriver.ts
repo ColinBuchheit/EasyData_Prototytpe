@@ -1,23 +1,15 @@
 // src/services/dbDrivers/sqliteDriver.ts
-import sqlite3 from 'sqlite3';
-import { open, Database } from 'sqlite';
+import { requestDatabaseSession } from '../ai.service'; // ✅ AI-Agent Session Handling
 import logger from '../../config/logger';
-import { DBConfig } from '../connectionmanager';
 
-export const connectSQLite = async (config: DBConfig): Promise<Database> => {
+export const connectSQLite = async (userId: number, dbType: string) => {
   try {
-    // For SQLite, the "database" field will be the file path to the database.
-    // Other fields (host, port, user, password) are typically not used.
-    const db = await open({
-      filename: config.database,
-      driver: sqlite3.Database,
-    });
-    // Test the connection with a simple query.
-    const row = await db.get('SELECT 1 as result');
-    logger.info('SQLite connection established. Test query result:', row);
-    return db;
+    // ✅ Request an AI-Agent session instead of using credentials
+    const session = await requestDatabaseSession(userId, dbType, "session"); // ✅ Specify session-based access
+    logger.info(`✅ AI-Agent SQLite session established. Session Token: ${session.sessionToken}`);
+    return session;
   } catch (error) {
-    logger.error('Failed to connect to SQLite', error);
+    logger.error('❌ Failed to create SQLite session via AI-Agent:', error);
     throw error;
   }
 };

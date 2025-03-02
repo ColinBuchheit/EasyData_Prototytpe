@@ -2,6 +2,11 @@ import { Pool } from 'pg';
 import { ENV } from './env';
 import logger from './logger';
 
+// ✅ Ensure DB_TYPE is included for multi-DB support (future-proofing)
+if (!ENV.DB_TYPE) {
+  throw new Error("❌ Missing DB_TYPE in environment variables.");
+}
+
 const pool = new Pool({
   host: ENV.DB_HOST,
   port: ENV.DB_PORT,

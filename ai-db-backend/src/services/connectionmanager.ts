@@ -1,139 +1,114 @@
-// src/services/connectionManager.ts
 import logger from "../config/logger";
-import { Pool as PostgresPool } from "pg";
-import mysql, { Pool as MySQLPool } from "mysql2/promise";
-import sql, { ConnectionPool as MSSQLPool } from "mssql";
-import { Database as SQLiteDatabase } from "sqlite";
-
-// Import database connection functions
-import { connectPostgres } from "./dbDrivers/postgresDriver";
-import { connectMySQL } from "./dbDrivers/mysqlDriver";
-import { connectMSSQL } from "./dbDrivers/mssqlDriver";
-import { connectSQLite } from "./dbDrivers/sqliteDriver";
-
-// Import schema introspection functions
-import { getPostgresSchema, getMySQLSchema, getMSSQLSchema, getSQLiteSchema } from "./schemaIntrospection";
-
-export interface DBConfig {
-  dbType: "postgres" | "mysql" | "mssql" | "sqlite";
-  host: string;
-  port: number;
-  user: string;
-  password: string;
-  database: string;
-  maxConnections?: number; // ✅ Added connection pooling support
-}
+import { requestDatabaseSession, fetchDatabaseSchema, disconnectDatabaseSession } from "../services/ai.service"; // ✅ AI-Agent Calls
+import { getSession } from "../services/dbSession.service"; // ✅ Session Validation
+import pool from "../config/db"; // ✅ Access DB for credentials
+import { decrypt } from "../utils/encryption"; // ✅ Decrypt stored credentials if needed
 
 export class ConnectionManager {
-  private connection: PostgresPool | MySQLPool | MSSQLPool | SQLiteDatabase | null = null;
-  private config: DBConfig;
-  private schema: Record<string, any> | null = null; // Schema as a structured object
+  private dbType: string;
+  private sessionToken: string | null = null;
 
-  constructor(config: DBConfig) {
-    if (!config.dbType || !config.host || !config.user || !config.database) {
-      throw new Error("❌ Missing required database connection parameters.");
-    }
-    this.config = { ...config, maxConnections: config.maxConnections || 10 }; // ✅ Default max connections
+  constructor(dbType: string) {
+    this.dbType = dbType;
   }
 
   /**
-   * Establishes a database connection based on the provided configuration.
+   * Fetch user database credentials and request an AI-Agent session.
    */
-  public async connect(): Promise<void> {
+  public async connect(userId: number): Promise<void> {
     try {
-      if (this.isConnected()) {
-        logger.warn(`⚠️ Already connected to ${this.config.dbType}. Reusing existing connection.`);
-        return;
+      const { rows } = await pool.query(
+        `SELECT auth_method, host, port, username, encrypted_password 
+         FROM user_databases WHERE user_id = $1 AND db_type = $2`,
+        [userId, this.dbType]
+      );
+
+      if (rows.length === 0) {
+        throw new Error("❌ No database credentials found.");
       }
 
-      switch (this.config.dbType) {
-        case "postgres":
-          this.connection = await connectPostgres({ ...this.config, maxConnections: this.config.maxConnections });
-          this.schema = await getPostgresSchema(this.connection as PostgresPool);
-          break;
-        case "mysql":
-          this.connection = await connectMySQL({ ...this.config, maxConnections: this.config.maxConnections });
-          this.schema = await getMySQLSchema(this.connection as MySQLPool);
-          break;
-        case "mssql":
-          this.connection = await connectMSSQL({ ...this.config, maxConnections: this.config.maxConnections });
-          this.schema = await getMSSQLSchema(this.connection as MSSQLPool);
-          break;
-        case "sqlite":
-          this.connection = await connectSQLite(this.config);
-          this.schema = await getSQLiteSchema(this.connection as SQLiteDatabase);
-          break;
-        default:
-          throw new Error(`❌ Database type ${this.config.dbType} is not supported.`);
-      }
+      const { auth_method, host, port, username, encrypted_password } = rows[0];
 
-      logger.info(`✅ Successfully connected to ${this.config.dbType} database.`);
+      if (auth_method === "stored") {
+        if (!host || !port || !username || !encrypted_password) {
+          throw new Error("❌ Missing stored credentials.");
+        }
+
+        const password = decrypt(encrypted_password); // ✅ Decrypt password securely
+
+        // ✅ Send credentials to AI-Agent for session-based access
+        const session = await requestDatabaseSession(userId, this.dbType, auth_method, host, port, username, password);
+
+        this.sessionToken = session.sessionToken;
+        logger.info(`✅ AI-Agent session established using stored credentials for ${this.dbType} (Session Token: ${this.sessionToken})`);
+      } else {
+        // ✅ Use session-based access (AI-Agent handles authentication dynamically)
+        const session = await requestDatabaseSession(userId, this.dbType, auth_method); // ✅ Pass authMethod explicitly
+
+        this.sessionToken = session.sessionToken;
+        logger.info(`✅ AI-Agent session established using temporary session for ${this.dbType} (Session Token: ${this.sessionToken})`);
+      }
     } catch (error) {
-      logger.error(`❌ Failed to connect to ${this.config.dbType} database:`, error);
-      throw error;
+      const err = error as Error; // ✅ Fix: Explicitly cast error
+      logger.error(`❌ Failed to create AI-Agent session:`, err.message);
+      throw err;
     }
   }
 
   /**
-   * Disconnects from the active database connection.
+   * Retrieves the database schema using AI-Agent.
+   */
+  public async getSchema(): Promise<Record<string, any>> {
+    if (!this.sessionToken) {
+      throw new Error("❌ No active session token.");
+    }
+
+    return await fetchDatabaseSchema(this.sessionToken);
+  }
+
+  /**
+   * Validates if the session is still active.
+   */
+  public async validateSession(userId: number): Promise<boolean> {
+    if (!this.sessionToken) {
+      logger.warn("⚠️ No active session to validate.");
+      return false;
+    }
+
+    const session = await getSession(userId, this.sessionToken);
+    if (!session) {
+      logger.warn(`⚠️ Session ${this.sessionToken} is no longer valid.`);
+      this.sessionToken = null;
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Returns the current session token (Read-Only Access)
+   */
+  public getSessionToken(): string | null {
+    return this.sessionToken;
+  }
+
+  /**
+   * Disconnects the database session via AI-Agent.
    */
   public async disconnect(): Promise<void> {
+    if (!this.sessionToken) {
+      logger.warn("⚠️ No active session to disconnect.");
+      return;
+    }
+
     try {
-      if (!this.connection) {
-        logger.warn("⚠️ No active database connection to disconnect.");
-        return;
-      }
-
-      switch (this.config.dbType) {
-        case "postgres":
-          await (this.connection as PostgresPool).end();
-          break;
-        case "mysql":
-          await (this.connection as MySQLPool).end();
-          break;
-        case "mssql":
-          await (this.connection as MSSQLPool).close();
-          break;
-        case "sqlite":
-          await (this.connection as SQLiteDatabase).close();
-          break;
-        default:
-          throw new Error(`❌ Database type ${this.config.dbType} is not supported.`);
-      }
-
-      logger.info(`✅ Disconnected from ${this.config.dbType} database.`);
-      this.connection = null;
-      this.schema = null;
+      await disconnectDatabaseSession(this.sessionToken);
+      this.sessionToken = null;
+      logger.info(`✅ AI-Agent session closed for ${this.dbType}.`);
     } catch (error) {
-      logger.error(`❌ Error disconnecting from ${this.config.dbType} database:`, error);
-      throw error;
-    }
-  }
-
-  /**
-   * Retrieves the database schema.
-   */
-  public getSchema(): Record<string, any> {
-    if (!this.schema) {
-      throw new Error("❌ No schema available. Connect to a database first.");
-    }
-    return this.schema;
-  }
-
-  /**
-   * Checks if there is an active connection.
-   */
-  public isConnected(): boolean {
-    return this.connection !== null;
-  }
-
-  /**
-   * Automatically reconnects if the connection is lost.
-   */
-  public async reconnect(): Promise<void> {
-    if (!this.isConnected()) {
-      logger.warn(`🔄 Attempting to reconnect to ${this.config.dbType} database...`);
-      await this.connect();
+      const err = error as Error; // ✅ Fix: Explicitly cast error
+      logger.error(`❌ AI-Agent failed to disconnect:`, err.message);
+      throw err;
     }
   }
 }
