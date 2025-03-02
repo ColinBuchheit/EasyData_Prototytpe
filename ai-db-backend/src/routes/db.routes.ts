@@ -3,6 +3,8 @@ import { verifyToken, requireRole, AuthRequest } from "../middleware/auth"; // �
 import { createPersistentDBSession, disconnectUserSession } from "../services/dbSession.service";
 import { fetchDatabaseSchema } from "../services/ai.service"; // ✅ AI-Agent Handles Schema Retrieval
 import logger from "../config/logger";
+import { listActiveAISessions } from "../services/ai.service";
+
 
 const router = Router();
 
@@ -85,6 +87,22 @@ router.post("/disconnect", verifyToken, requireRole("admin"), async (req: AuthRe
   } catch (error) {
     logger.error("❌ Failed to close database session:", (error as Error).message);
     res.status(500).json({ message: "Failed to close database session.", error: (error as Error).message });
+  }
+});
+
+
+/**
+ * @swagger
+ * /api/db/sessions:
+ *   get:
+ *     summary: Lists all active AI-Agent sessions (Admin-only)
+ */
+router.get("/db/sessions", verifyToken, requireRole("admin"), async (req, res) => {
+  try {
+    const sessions = await listActiveAISessions();
+    res.json({ activeSessions: sessions });
+  } catch (error) {
+    res.status(500).json({ error: "❌ Failed to retrieve active AI-Agent sessions." });
   }
 });
 

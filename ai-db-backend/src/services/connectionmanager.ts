@@ -3,6 +3,8 @@ import { requestDatabaseSession, fetchDatabaseSchema, disconnectDatabaseSession 
 import { getSession } from "../services/dbSession.service"; // ✅ Session Validation
 import pool from "../config/db"; // ✅ Access DB for credentials
 import { decrypt } from "../utils/encryption"; // ✅ Decrypt stored credentials if needed
+import { validateAISession } from "../services/ai.service";
+
 
 export class ConnectionManager {
   private dbType: string;
@@ -69,21 +71,24 @@ export class ConnectionManager {
   /**
    * Validates if the session is still active.
    */
-  public async validateSession(userId: number): Promise<boolean> {
-    if (!this.sessionToken) {
-      logger.warn("⚠️ No active session to validate.");
-      return false;
-    }
-
-    const session = await getSession(userId, this.sessionToken);
-    if (!session) {
-      logger.warn(`⚠️ Session ${this.sessionToken} is no longer valid.`);
-      this.sessionToken = null;
-      return false;
-    }
-
-    return true;
+  
+ 
+public async validateSession(userId: number): Promise<boolean> {
+  if (!this.sessionToken) {
+    logger.warn("⚠️ No active session to validate.");
+    return false;
   }
+
+  const isValid = await validateAISession(this.sessionToken);
+  if (!isValid) {
+    logger.warn(`⚠️ Session ${this.sessionToken} is no longer valid.`);
+    this.sessionToken = null;
+    return false;
+  }
+
+  return true;
+}
+  
 
   /**
    * Returns the current session token (Read-Only Access)

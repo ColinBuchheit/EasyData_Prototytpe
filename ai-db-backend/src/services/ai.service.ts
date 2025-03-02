@@ -1,16 +1,15 @@
 import axios from "axios";
 import logger from "../config/logger";
-import { ENV } from "../config/env"; // ✅ Use centralized env loader
+import { ENV } from "../config/env";
 
 const MAX_RETRIES = 3;
 const BACKOFF_DELAY = 2000; // 2 seconds
 
+// ✅ Simple in-memory cache for schema responses
+const schemaCache = new Map<string, any>();
+
 /**
- * Makes a request to the AI-Agent Network.
- * Implements retries with exponential backoff.
- * @param {string} endpoint - The AI-Agent endpoint to call.
- * @param {any} payload - The request body payload.
- * @returns {Promise<any>} - The AI response.
+ * Makes a request to the AI-Agent Network with retries.
  */
 async function requestAI(endpoint: string, payload: any): Promise<any> {
   let attempt = 0;
@@ -47,7 +46,7 @@ async function requestAI(endpoint: string, payload: any): Promise<any> {
 }
 
 /**
- * Requests a database session from AI-Agent using either session-based or stored credentials.
+ * Requests a database session from AI-Agent.
  */
 export async function requestDatabaseSession(
   userId: number,
@@ -60,7 +59,6 @@ export async function requestDatabaseSession(
 ): Promise<any> {
   const payload: any = { userId, dbType, authMethod };
 
-  // ✅ If using stored authentication, send credentials securely
   if (authMethod === "stored" && host && port && username && password) {
     payload.host = host;
     payload.port = port;
@@ -72,14 +70,49 @@ export async function requestDatabaseSession(
 }
 
 /**
- * Retrieves the database schema using an active session token.
+ * Retrieves the database schema using an AI-Agent session.
+ * Implements schema caching to reduce redundant requests.
  */
 export async function fetchDatabaseSchema(sessionToken: string): Promise<any> {
-  return await requestAI("fetch-schema", { sessionToken });
+  if (schemaCache.has(sessionToken)) {
+    logger.info("⚡ Returning cached schema result.");
+    return schemaCache.get(sessionToken);
+  }
+
+  const schema = await requestAI("fetch-schema", { sessionToken });
+  schemaCache.set(sessionToken, schema); // ✅ Cache schema result
+  return schema;
 }
 
 /**
- * Executes a query via the AI-Agent Network using an active session.
+ * Validates if an AI-Agent session is still active.
+ */
+export async function validateAISession(sessionToken: string): Promise<boolean> {
+  try {
+    const response = await requestAI("validate-session", { sessionToken });
+    return response.isValid;
+  } catch (error) {
+    logger.warn("⚠️ AI-Agent session validation failed.");
+    return false;
+  }
+}
+
+/**
+ * Lists all active AI-Agent sessions.
+ */
+export async function listActiveAISessions(): Promise<any[]> {
+  return await requestAI("list-sessions", {});
+}
+
+/**
+ * Checks if the AI-Agent API is responsive.
+ */
+export async function checkAIServiceHealth(): Promise<any> {
+  return await requestAI("check-health", {});
+}
+
+/**
+ * Executes a query via the AI-Agent Network.
  */
 export async function executeAIQuery(userQuery: string, sessionToken: string): Promise<any> {
   return await requestAI("execute-query", { userQuery, sessionToken });
@@ -90,4 +123,11 @@ export async function executeAIQuery(userQuery: string, sessionToken: string): P
  */
 export async function disconnectDatabaseSession(sessionToken: string): Promise<any> {
   return await requestAI("disconnect-database", { sessionToken });
+}
+
+/**
+ * Logs AI-Agent activity for debugging and tracking.
+ */
+export async function logAIActivity(action: string, details?: any): Promise<void> {
+  await requestAI("log-activity", { action, details });
 }
