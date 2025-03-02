@@ -8,6 +8,7 @@ import logger from "./config/logger";
 import swaggerSpec from "./config/swagger";
 import { ENV } from "./config/env";
 import pool from "./config/db"; // ✅ Database connection for cleanup
+import { checkAIServiceHealth } from "./services/ai.service"; // ✅ AI-Agent Health Check Function
 
 // ✅ Import API Routes
 import authRoutes from "./routes/auth.routes";
@@ -41,6 +42,23 @@ app.use("/api/users", userRoutes);
 app.use("/api/query", queryRoutes);
 app.use("/api/databases", userdbRoutes);
 app.use("/api/db", dbRoutes);
+
+// ✅ AI-Agent Health Check Endpoint
+/**
+ * @swagger
+ * /api/health/ai-agent:
+ *   get:
+ *     summary: Checks AI-Agent Network health
+ *     description: Ensures the AI-Agent API is responsive.
+ */
+app.get("/api/health/ai-agent", async (req: Request, res: Response) => {
+  try {
+    const healthStatus = await checkAIServiceHealth();
+    res.json({ status: "✅ AI-Agent is online", details: healthStatus });
+  } catch (error) {
+    res.status(500).json({ error: "❌ AI-Agent is unavailable." });
+  }
+});
 
 // ✅ Global Error Handling Middleware (Fixed TypeScript Issues)
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
