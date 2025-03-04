@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "crewai": "^1.0.1"
+  }
+}
