@@ -1,7 +1,9 @@
+// src/routes/query.routes.ts
 import { Router, Response } from "express";
-import { executeAIQuery } from "../services/ai.service"; // ✅ AI-Agent Query Execution
-import { verifyToken, AuthRequest } from "../middleware/auth"; // ✅ Correct request type
-import { getSession } from "../services/dbSession.service"; // ✅ Validate sessions before executing queries
+import { generateSQLQuery, fetchDatabaseSchema } from "../services/ai.service"; 
+import { verifyToken, AuthRequest } from "../middleware/auth"; 
+import { ConnectionManager } from "../services/connectionmanager"; 
+import { pool } from "../config/db";
 import rateLimit from "express-rate-limit";
 import logger from "../config/logger";
 
@@ -16,54 +18,71 @@ const queryLimiter = rateLimit({
 
 /**
  * @swagger
- * /api/ai-query:
+ * /api/query:
  *   post:
- *     summary: Execute a query via AI-Agent using a session token
+ *     summary: Process a query via AI and execute it in the backend
  *     tags: [AI Queries]
  */
-router.post("/ai-query", verifyToken, queryLimiter, async (req: AuthRequest, res: Response): Promise<void> => {
+router.post("/query", verifyToken, queryLimiter, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { user_query, sessionToken } = req.body;
+    const { user_query, db_type } = req.body;
+    const userId = req.user.id;
+
+    const validDbTypes = ["postgres", "mysql", "mssql", "sqlite"];
+    if (!db_type || !validDbTypes.includes(db_type)) {
+      res.status(400).json({ error: "❌ Invalid or missing database type." });
+      return;
+    }
 
     if (!user_query || typeof user_query !== "string") {
       res.status(400).json({ error: "❌ Missing or invalid query input." });
       return;
     }
 
-    if (!sessionToken || typeof sessionToken !== "string") {
-      res.status(400).json({ error: "❌ Missing or invalid session token." });
+    // ✅ Ensure user is connected
+    if (!ConnectionManager.isConnected(userId, db_type)) {
+      res.status(403).json({ error: "❌ No active database connection found. Please connect first." });
       return;
     }
 
-    // ✅ Validate session before executing query
-    const session = await getSession(req.user.id, sessionToken);
-    if (!session) {
-      res.status(403).json({ error: "❌ Invalid or expired session token." });
+    // ✅ Get connection manager instance with `dbType`
+    const connectionManager = ConnectionManager.getInstance(userId, db_type);
+
+    // ✅ Fetch Schema from AI service
+    logger.info(`🔍 Fetching schema for user ${userId}, database type: ${db_type}`);
+    const schema = await fetchDatabaseSchema(userId, db_type);
+
+    if (!schema || schema.length === 0) {
+      res.status(500).json({ error: "❌ Failed to retrieve database schema." });
       return;
     }
 
-    // ✅ Enhanced input validation to prevent SQL Injection
-    const sanitizedQuery = user_query.replace(/[^a-zA-Z0-9 _-]/g, "").trim();
+    logger.info(`✅ Schema retrieved for user ${userId}`);
 
-    if (sanitizedQuery.length < 3) {
-      res.status(400).json({ error: "❌ Query too short." });
-      return;
-    }
-
-    logger.info(`🔍 Processing AI query request: ${sanitizedQuery}`);
-
-    // ✅ Fetch AI-generated SQL query
-    const sqlQuery = await executeAIQuery(sanitizedQuery, sessionToken);
+    // ✅ Generate SQL Query
+    logger.info(`🔍 Generating SQL query for user ${userId}: ${user_query}`);
+    const sqlQuery = await generateSQLQuery(user_query, db_type, schema);
 
     if (!sqlQuery || typeof sqlQuery !== "string") {
       throw new Error("AI service returned an invalid response.");
     }
 
-    res.json({ sql_query: sqlQuery });
+    // ✅ Security Check: Only allow SELECT queries
+    if (!sqlQuery.trim().toUpperCase().startsWith("SELECT")) {
+      res.status(403).json({ error: "❌ Only SELECT queries are allowed." });
+      return;
+    }
+
+    logger.info(`✅ AI-Generated SQL for user ${userId}: ${sqlQuery}`);
+
+    // ✅ Execute Query
+    const result = await pool.query(sqlQuery);
+
+    res.json({ success: true, data: result.rows });
   } catch (error: unknown) {
-    const err = error as Error; // ✅ Explicitly cast `error` to `Error`
-    logger.error("❌ AI Query Processing Failed:", err.message);
-    res.status(500).json({ error: "Failed to process query.", details: err.message });
+    const err = error as Error;
+    logger.error(`❌ Query Execution Failed: ${err.message}`);
+    res.status(500).json({ error: "Failed to execute query.", details: err.message });
   }
 });
 

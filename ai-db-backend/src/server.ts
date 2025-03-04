@@ -1,25 +1,33 @@
-// src/server.ts
-import dotenv from "dotenv";
-dotenv.config(); // ✅ Ensure environment variables are loaded first
-
+import http from "http";
 import app from "./app";
-import { ENV } from "./config/env"; // ✅ Use ENV for consistency
+import { ENV } from "./config/env";
+import { pool } from "./config/db"; // ✅ Fixes TS2613
 import logger from "./config/logger";
+import { ConnectionManager } from "./services/connectionmanager";
 
-// ✅ Start the server
-const server = app.listen(ENV.PORT, () => {
-  logger.info(`🚀 Server running on port ${ENV.PORT}`);
+const PORT = ENV.PORT || 5000;
+const server = http.createServer(app);
+
+server.listen(PORT, () => {
+  logger.info(`🚀 Server running on port ${PORT}`);
 });
 
-// ✅ Graceful shutdown handling
-const shutdown = () => {
-  logger.info("🔄 Shutting down server gracefully...");
+// ✅ Graceful Shutdown Handling
+const gracefulShutdown = async () => {
+  logger.info("⚠️ Initiating graceful shutdown...");
+
+  // ✅ Close all active database connections
+  await ConnectionManager.closeAllConnections(); // ✅ Fixed missing method
+  await pool.end();
+
+  logger.info("✅ Database connections closed.");
+
   server.close(() => {
-    logger.info("✅ Server closed.");
+    logger.info("✅ Server shutdown complete.");
     process.exit(0);
   });
 };
 
-// Handle termination signals
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
+// ✅ Handle process termination signals
+process.on("SIGINT", gracefulShutdown);
+process.on("SIGTERM", gracefulShutdown);

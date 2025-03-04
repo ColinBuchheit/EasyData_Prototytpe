@@ -15,15 +15,15 @@ const router = Router();
 
 // ✅ Rate limiter for login to prevent brute-force attacks
 const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // Limit each IP to 5 requests per windowMs
+  windowMs: Number(process.env.LOGIN_RATE_LIMIT_WINDOW) || 15 * 60 * 1000,
+  max: Number(process.env.LOGIN_RATE_LIMIT_MAX) || 5,
   message: { error: "❌ Too many login attempts, please try again later." }
 });
 
 // ✅ Rate limiter for `/register` to prevent spam
 const registerLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 3,
+  windowMs: Number(process.env.REGISTER_RATE_LIMIT_WINDOW) || 15 * 60 * 1000,
+  max: Number(process.env.REGISTER_RATE_LIMIT_MAX) || 3,
   message: { error: "❌ Too many registrations, please try again later." }
 });
 
@@ -34,7 +34,14 @@ const registerLimiter = rateLimit({
  *     summary: Register a new user
  *     tags: [Auth]
  */
-router.post("/register", registerLimiter, register);
+router.post("/register", registerLimiter, async (req, res, next) => {
+  try {
+    await register(req, res);
+    logger.info(`✅ New user registered: ${req.body.username}`);
+  } catch (error) {
+    next(error);
+  }
+});
 
 /**
  * @swagger

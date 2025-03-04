@@ -1,5 +1,7 @@
 import logger from "../config/logger";
 import crypto from "crypto";
+import { ConnectionManager } from "../services/connectionmanager";
+import { refreshSchemaOnConnect } from "../services/ai.service";
 
 interface SessionData {
   userId: number;
@@ -13,9 +15,6 @@ const sessionTimeouts: Record<string, NodeJS.Timeout> = {}; // Tracks auto-disco
 
 const SESSION_EXPIRY_MS = 30 * 60 * 1000; // 30-minute session timeout
 
-/**
- * Generates a unique session token
- */
 function generateSessionToken(): string {
   return crypto.randomBytes(16).toString("hex");
 }
@@ -24,6 +23,10 @@ function generateSessionToken(): string {
  * Creates a persistent database session for the user.
  */
 export async function createPersistentDBSession(userId: number, dbType: string): Promise<{ sessionToken: string; expires_in: number }> {
+  if (!ConnectionManager.isConnected(userId, dbType)) { // ✅ Validate dbType
+    throw new Error(`❌ User ${userId} does not have an active ${dbType} database connection.`);
+  }
+
   const sessionToken = generateSessionToken();
   const expiresAt = new Date(Date.now() + SESSION_EXPIRY_MS);
 
@@ -34,45 +37,45 @@ export async function createPersistentDBSession(userId: number, dbType: string):
     expiresAt,
   };
 
-  // ✅ Set timeout to disconnect session automatically after expiry
   sessionTimeouts[sessionToken] = setTimeout(() => {
     disconnectUserSession(sessionToken);
   }, SESSION_EXPIRY_MS);
 
   logger.info(`✅ Created session for User ${userId} (DB: ${dbType}) - Expires in 30 mins`);
 
-  return { sessionToken, expires_in: SESSION_EXPIRY_MS / 1000 }; // Returns expiration in seconds
-}
-
-/**
- * Retrieves an active session, ensuring the user owns it.
- */
-export async function getSession(userId: number, sessionToken: string): Promise<SessionData | null> {
-  const session = sessionStore[sessionToken];
-  if (!session) {
-    logger.warn(`⚠️ Session ${sessionToken} not found.`);
-    return null;
+  try {
+    logger.info(`🔄 Refreshing schema for User ${userId} (${dbType})...`);
+    await refreshSchemaOnConnect(userId, dbType);
+    logger.info(`✅ Schema refreshed for User ${userId} (${dbType})`);
+  } catch (error: unknown) {
+    const err = error as Error;
+    logger.error(`❌ Failed to refresh schema for User ${userId}, DB: ${dbType}: ${err.message}`);
   }
 
-  if (session.userId !== userId) {
-    logger.warn(`🚫 Unauthorized access attempt by User ${userId} for session ${sessionToken}`);
-    return null;
-  }
-
-  return session;
+  return { sessionToken, expires_in: SESSION_EXPIRY_MS / 1000 };
 }
 
 /**
  * Disconnects a database session manually or after timeout.
  */
 export async function disconnectUserSession(sessionToken: string): Promise<void> {
+  const session = sessionStore[sessionToken];
+
+  if (!session) {
+    logger.warn(`⚠️ Attempted to disconnect a non-existent session: ${sessionToken}`);
+    return;
+  }
+
   if (sessionTimeouts[sessionToken]) {
     clearTimeout(sessionTimeouts[sessionToken]);
     delete sessionTimeouts[sessionToken];
   }
 
-  if (sessionStore[sessionToken]) {
-    logger.info(`✅ Session ${sessionToken} closed.`);
-    delete sessionStore[sessionToken];
-  }
+  // ✅ Use existing ConnectionManager instance
+  const { userId, dbType } = session;
+  const connectionManager = ConnectionManager.getInstance(userId, dbType);
+  await connectionManager.disconnect();
+
+  logger.info(`✅ Session ${sessionToken} closed for User ${userId}`);
+  delete sessionStore[sessionToken];
 }

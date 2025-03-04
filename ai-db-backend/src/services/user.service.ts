@@ -1,6 +1,6 @@
 // src/services/user.service.ts
 import bcrypt from "bcrypt";
-import pool from "../config/db";
+import { pool } from "../config/db";
 import { User } from "../models/user.model";
 import logger from "../config/logger";
 
@@ -23,10 +23,16 @@ export const registerUser = async ({
 
     logger.info(`🔍 Registering user: ${username}`);
 
-    // ✅ Log raw password (for debugging)
-    console.log("🔍 Raw password before hashing:", `"${password}"`);
-    console.log("🔍 Password trimmed:", `"${password.trim()}"`);
-    console.log("🔍 Is password already hashed?", password.startsWith("$2b$10$"));
+    // ✅ Ensure role is valid (Prevent unauthorized admin account creation)
+    if (role !== "user" && role !== "admin") {
+      throw new Error("❌ Invalid role assignment.");
+    }
+
+    // ✅ Check if the username already exists
+    const existingUser = await findUserByUsername(username);
+    if (existingUser) {
+      throw new Error("❌ Username already taken.");
+    }
 
     // ✅ Prevent double hashing
     if (password.startsWith("$2b$10$")) {
@@ -34,20 +40,19 @@ export const registerUser = async ({
     }
 
     const password_hash = await bcrypt.hash(password.trim(), saltRounds);
-
-    // ✅ Log hashed password before storing
-    console.log("🔍 Hashed password before storing:", password_hash);
+    logger.info("✅ Password hashed successfully.");
 
     const result = await pool.query(
-      "INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3) RETURNING *",
+      "INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3) RETURNING id, username, role",
       [username, password_hash, role]
     );
 
     logger.info(`✅ User ${username} registered successfully.`);
     return result.rows[0];
-  } catch (error) {
-    logger.error("❌ Error registering user:", error);
-    throw error;
+  } catch (error: unknown) {
+    const err = error as Error;
+    logger.error(`❌ Error registering user: ${err.message}`);
+    throw err;
   }
 };
 
@@ -57,13 +62,11 @@ export const findUserByUsername = async (username: string): Promise<User | null>
 
     const result = await pool.query("SELECT id, username, role, password_hash FROM users WHERE username = $1", [username]);
 
-    // ✅ Log retrieved user data
-    console.log("🔍 Retrieved user from DB:", result.rows[0]);
-
     return result.rows[0] || null;
-  } catch (error) {
-    logger.error("❌ Error finding user by username:", error);
-    throw error;
+  } catch (error: unknown) {
+    const err = error as Error;
+    logger.error(`❌ Error finding user by username: ${err.message}`);
+    throw err;
   }
 };
 
@@ -72,9 +75,10 @@ export const getUsers = async (): Promise<User[]> => {
     logger.info("🔍 Fetching all users...");
     const result = await pool.query("SELECT id, username, role FROM users");
     return result.rows;
-  } catch (error) {
-    logger.error("❌ Error fetching users:", error);
-    throw error;
+  } catch (error: unknown) {
+    const err = error as Error;
+    logger.error(`❌ Error fetching users: ${err.message}`);
+    throw err;
   }
 };
 
@@ -84,9 +88,10 @@ export const getUser = async (id: string): Promise<User | null> => {
     const result = await pool.query("SELECT id, username, role FROM users WHERE id = $1", [id]);
 
     return result.rows[0] || null;
-  } catch (error) {
-    logger.error("❌ Error fetching user by ID:", error);
-    throw error;
+  } catch (error: unknown) {
+    const err = error as Error;
+    logger.error(`❌ Error fetching user by ID: ${err.message}`);
+    throw err;
   }
 };
 
@@ -108,9 +113,10 @@ export const updateUserById = async (id: string, data: Partial<User>): Promise<U
 
     logger.info(`✅ User ${id} updated successfully.`);
     return result.rows[0];
-  } catch (error) {
-    logger.error("❌ Error updating user:", error);
-    throw error;
+  } catch (error: unknown) {
+    const err = error as Error;
+    logger.error(`❌ Error updating user: ${err.message}`);
+    throw err;
   }
 };
 
@@ -119,8 +125,9 @@ export const deleteUserById = async (id: string): Promise<void> => {
     logger.info(`🔍 Deleting user ID: ${id}`);
     await pool.query("DELETE FROM users WHERE id = $1", [id]);
     logger.info(`✅ User ${id} deleted.`);
-  } catch (error) {
-    logger.error("❌ Error deleting user:", error);
-    throw error;
+  } catch (error: unknown) {
+    const err = error as Error;
+    logger.error(`❌ Error deleting user: ${err.message}`);
+    throw err;
   }
 };

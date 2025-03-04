@@ -1,15 +1,25 @@
 // src/services/dbDrivers/mysqlDriver.ts
-import { requestDatabaseSession } from '../ai.service'; // ✅ AI-Agent Session Handling
-import logger from '../../config/logger';
+import logger from "../../config/logger";
+import { ConnectionManager } from "../connectionmanager";
+import { fetchDatabaseSchema } from "../ai.service";
+import { fetchCloudCredentials } from "../cloudAuth.service";
 
-export const connectMySQL = async (userId: number, dbType: string) => {
+export const connectMySQL = async (userId: number, dbType: string, cloudProvider: string) => {
   try {
-    // ✅ Request an AI-Agent session instead of using credentials
-    const session = await requestDatabaseSession(userId, dbType, "session"); // ✅ Specify session-based access
-    logger.info(`✅ AI-Agent MySQL session established. Session Token: ${session.sessionToken}`);
-    return session;
+    const credentials = await fetchCloudCredentials(userId, dbType, cloudProvider);
+    if (!credentials) {
+      throw new Error("❌ Missing credentials for MySQL connection.");
+    }
+
+    const connectionManager = new ConnectionManager(userId, dbType, credentials);
+    await connectionManager.connect(credentials);
+
+    logger.info(`✅ MySQL connection established for User ${userId}`);
+
+    await fetchDatabaseSchema(userId, dbType);
+    return connectionManager;
   } catch (error) {
-    logger.error('❌ Failed to create MySQL session via AI-Agent:', error);
+    logger.error(`❌ MySQL connection failed for User ${userId}: ${error}`);
     throw error;
   }
 };

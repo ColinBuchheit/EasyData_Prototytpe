@@ -1,77 +1,71 @@
-import express, { Request, Response, NextFunction } from "express";
+import express from "express";
 import helmet from "helmet";
 import cors from "cors";
+import rateLimit from "express-rate-limit"; // ✅ Ensure this import works
 import morgan from "morgan";
-import swaggerUi from "swagger-ui-express";
-import rateLimit from "express-rate-limit";
-import logger from "./config/logger";
-import swaggerSpec from "./config/swagger";
 import { ENV } from "./config/env";
-import pool from "./config/db"; // ✅ Database connection for cleanup
-import { checkAIServiceHealth } from "./services/ai.service"; // ✅ AI-Agent Health Check Function
-
-// ✅ Import API Routes
+import { pool } from "./config/db"; // ✅ Fixes TS2613
+import logger from "./config/logger";
 import authRoutes from "./routes/auth.routes";
-import userRoutes from "./routes/user.routes";
-import queryRoutes from "./routes/query.routes";
-import userdbRoutes from "./routes/userdb.routes";
 import dbRoutes from "./routes/db.routes";
+import queryRoutes from "./routes/query.routes";
+import userRoutes from "./routes/user.routes";
+import userDBRoutes from "./routes/userdb.routes";
+import { checkAIServiceHealth } from "./services/ai.service";
+
 
 const app = express();
 
-// ✅ Security Middleware
+// ✅ Middleware
 app.use(helmet());
-app.use(cors());
-app.use(express.json({ limit: "5mb" })); // ✅ Prevent large payloads
-app.use(morgan("combined"));
+app.use(cors({ origin: ENV.CORS_ORIGIN || "*" })); // ✅ Fixed missing ENV property
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(morgan("dev"));
 
-// ✅ API Rate Limiting (Prevents API abuse)
-const apiLimiter = rateLimit({
+// ✅ Rate Limiting
+const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per window
-  message: { error: "Too many requests, please try again later." },
+  max: 100, // limit each IP
 });
-app.use("/api", apiLimiter);
+app.use(limiter);
 
-// ✅ Swagger API Documentation
-app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
-
-// ✅ Register API Routes
+// ✅ Routes
 app.use("/api/auth", authRoutes);
-app.use("/api/users", userRoutes);
-app.use("/api/query", queryRoutes);
-app.use("/api/databases", userdbRoutes);
 app.use("/api/db", dbRoutes);
+app.use("/api/query", queryRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/userdb", userDBRoutes);
 
-// ✅ AI-Agent Health Check Endpoint
-/**
- * @swagger
- * /api/health/ai-agent:
- *   get:
- *     summary: Checks AI-Agent Network health
- *     description: Ensures the AI-Agent API is responsive.
- */
-app.get("/api/health/ai-agent", async (req: Request, res: Response) => {
+// ✅ AI-Agent Health Check on Startup
+(async () => {
+  const isAIOnline = await checkAIServiceHealth();
+  if (isAIOnline) {
+    logger.info("✅ AI-Agent is online and ready.");
+  } else {
+    logger.warn("⚠️ AI-Agent is unreachable at startup.");
+  }
+})();
+
+// ✅ Health Check Endpoint
+app.get("/api/health", async (_req, res) => {
   try {
-    const healthStatus = await checkAIServiceHealth();
-    res.json({ status: "✅ AI-Agent is online", details: healthStatus });
+    await pool.query("SELECT 1");
+    res.status(200).json({ message: "✅ Backend is healthy" });
   } catch (error) {
-    res.status(500).json({ error: "❌ AI-Agent is unavailable." });
+    res.status(500).json({ message: "❌ Backend is unhealthy" });
   }
 });
 
-// ✅ Global Error Handling Middleware (Fixed TypeScript Issues)
-app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
-  logger.error(`❌ Error: ${err.message}`);
-  res.status(500).json({ error: err.message || "Internal Server Error" });
+// ✅ Global Error Handling
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  logger.error("❌ Internal Server Error:", err);
+  res.status(500).json({ message: "Internal Server Error" });
 });
 
-// ✅ Graceful Shutdown Handling
-process.on("SIGINT", async () => {
-  logger.info("⚠️ Shutting down server...");
-  await pool.end(); // ✅ Closes database connections
-  logger.info("✅ Database connections closed.");
-  process.exit(0);
+app.get("/", (_req, res) => {
+  res.status(200).json({ message: "✅ API is running on port " + ENV.PORT });
 });
+
 
 export default app;

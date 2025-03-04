@@ -1,10 +1,18 @@
+// src/routes/userdb.routes.ts
 import { Router } from "express";
-import { addUserDatabase, getUserDatabases, deleteUserDatabase } from "../controllers/userdb.controller";
-import { verifyToken, AuthRequest } from "../middleware/auth";
+import {
+  addUserDatabase,
+  getUserDatabases,
+  deleteUserDatabase
+} from "../controllers/userdb.controller";
+import { AuthRequest, verifyToken } from "../middleware/auth"; // ✅ Ensure `AuthRequest` is imported
 import { authorizeRoles } from "../middleware/rbac";
 import rateLimit from "express-rate-limit";
-import { Request, Response, NextFunction } from "express";
+import { Request, Response } from "express";
 import logger from "../config/logger";
+import { ConnectionManager } from "../services/connectionmanager";
+import { fetchCloudCredentials } from "../services/cloudAuth.service"; // ✅ Ensure credentials retrieval
+
 
 const router = Router();
 
@@ -22,52 +30,6 @@ const databaseLimiter = rateLimit({
   message: { error: "Too many database requests, please try again later." }
 });
 
-// ✅ Validate database connection input based on authentication type
-const validateDatabaseInput = (req: AuthRequest, res: Response, next: NextFunction): void => {
-  const { db_type, host, port, username, password, database_name, auth_method } = req.body;
-
-  const validDbTypes = ["postgres", "mysql", "mssql", "sqlite"];
-  if (!validDbTypes.includes(db_type)) {
-    res.status(400).json({ error: "Invalid database type. Allowed: postgres, mysql, mssql, sqlite." });
-    return;
-  }
-
-  if (!database_name || typeof database_name !== "string") {
-    res.status(400).json({ error: "Invalid database name format." });
-    return;
-  }
-
-  if (!["session", "stored"].includes(auth_method)) {
-    res.status(400).json({ error: "Invalid auth_method. Must be 'session' or 'stored'." });
-    return;
-  }
-
-  // ✅ If user selects `stored`, ensure credentials are provided
-  if (auth_method === "stored") {
-    if (!host || typeof host !== "string") {
-      res.status(400).json({ error: "Invalid host format." });
-      return;
-    }
-
-    if (!port || isNaN(Number(port))) {
-      res.status(400).json({ error: "Invalid port number." });
-      return;
-    }
-
-    if (!username || typeof username !== "string") {
-      res.status(400).json({ error: "Invalid username format." });
-      return;
-    }
-
-    if (!password || password.length < 8) {
-      res.status(400).json({ error: "Password must be at least 8 characters long." });
-      return;
-    }
-  }
-
-  next();
-};
-
 /**
  * @swagger
  * /api/databases:
@@ -75,7 +37,7 @@ const validateDatabaseInput = (req: AuthRequest, res: Response, next: NextFuncti
  *     summary: Store a new database connection securely with authentication method selection
  *     tags: [UserDatabases]
  */
-router.post("/databases", verifyToken, databaseLimiter, validateDatabaseInput, addUserDatabase);
+router.post("/databases", verifyToken, databaseLimiter, addUserDatabase);
 
 /**
  * @swagger
@@ -85,9 +47,8 @@ router.post("/databases", verifyToken, databaseLimiter, validateDatabaseInput, a
  *     tags: [UserDatabases]
  */
 router.get("/databases/:user_id", verifyToken, authorizeRoles(["admin", "user"]), databaseLimiter, async (req: AuthRequest, res) => {
-  const userId = Number(req.params.user_id); // ✅ Ensure userId is a number
+  const userId = Number(req.params.user_id);
 
-  // ✅ Users can only access their own databases unless they are admin
   if (req.user.role !== "admin" && req.user.id !== userId) {
     logger.warn(`🚫 Unauthorized attempt by User ${req.user.id} to access databases of User ${userId}`);
     res.status(403).json({ error: "You are not allowed to view these databases." });
@@ -107,9 +68,64 @@ router.get("/databases/:user_id", verifyToken, authorizeRoles(["admin", "user"])
  */
 router.delete("/databases/:id", verifyToken, authorizeRoles(["admin", "user"]), databaseLimiter, async (req: AuthRequest, res) => {
   const dbId = req.params.id;
-  
+
   logger.info(`⚠️ User ${req.user.id} is deleting database ${dbId}`);
   await deleteUserDatabase(req, res);
 });
+
+/**
+ * @swagger
+ * /api/databases/connect:
+ *   post:
+ *     summary: Connect to a database manually
+ *     tags: [UserDatabases]
+ */
+router.post("/connect", verifyToken, async (req: AuthRequest, res) => { // ✅ Fix applied
+  try {
+    const { dbType, cloudProvider } = req.body;
+    const userId = req.user.id; // ✅ Now TypeScript knows `user` exists
+
+    const credentials = await fetchCloudCredentials(userId, dbType, cloudProvider);
+    if (!credentials) {
+      res.status(401).json({ message: "❌ Unauthorized: No credentials found." });
+      return;
+    }
+
+    const connectionManager = new ConnectionManager(userId, dbType, credentials);
+    await connectionManager.connect(credentials);
+
+    res.json({ message: "✅ Successfully connected to database." });
+  } catch (error) {
+    res.status(500).json({ message: "Database connection failed.", error });
+  }
+});
+
+
+
+
+/**
+ * @swagger
+ * /api/databases/disconnect:
+ *   post:
+ *     summary: Disconnect from a database manually
+ *     tags: [UserDatabases]
+ */
+router.post("/databases/disconnect", verifyToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { db_type } = req.body;
+    const userId = req.user.id;
+
+    const connectionManager = ConnectionManager.getInstance(userId, db_type);
+    await connectionManager.disconnect();
+
+    logger.info(`✅ User ${userId} disconnected from ${db_type}`);
+    res.json({ message: `Successfully disconnected from ${db_type}` });
+  } catch (error) {
+    logger.error(`❌ Disconnection failed for User ${req.user.id}:`, error);
+    res.status(500).json({ error: "Failed to disconnect from database." });
+  }
+});
+
+
 
 export default router;

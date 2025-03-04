@@ -22,9 +22,8 @@ export const getAllUsers = async (req: AuthRequest, res: Response): Promise<void
     logger.info(`✅ Admin ${req.user.id} retrieved all users.`);
     res.json(users);
   } catch (error: unknown) {
-    const err = error as Error;
-    logger.error("❌ Error fetching users:", err.message);
-    res.status(500).json({ message: "Error fetching users", error: err.message });
+    logger.error("❌ Error fetching users:", (error as Error).message);
+    res.status(500).json({ message: "Error fetching users", error: (error as Error).message });
   }
 };
 
@@ -40,14 +39,14 @@ export const getUserById = async (req: AuthRequest, res: Response): Promise<void
       return;
     }
 
-    const user = await getUser(userId);
+    const user = await getUser(userId); // ✅ Ensure `userId` is passed as a `string`
 
     if (!user) {
       res.status(404).json({ message: "❌ User not found" });
       return;
     }
 
-    // ✅ Enforce proper role-based access control (Admins can view any user)
+    // ✅ Enforce role-based access control
     if (req.user.role !== "admin" && String(req.user.id) !== userId) {
       res.status(403).json({ message: "❌ Unauthorized access to user profile" });
       return;
@@ -56,9 +55,8 @@ export const getUserById = async (req: AuthRequest, res: Response): Promise<void
     logger.info(`✅ User ${req.user.id} accessed profile of User ${userId}.`);
     res.json(user);
   } catch (error: unknown) {
-    const err = error as Error;
-    logger.error("❌ Error fetching user:", err.message);
-    res.status(500).json({ message: "Error fetching user", error: err.message });
+    logger.error("❌ Error fetching user:", (error as Error).message);
+    res.status(500).json({ message: "Error fetching user", error: (error as Error).message });
   }
 };
 
@@ -93,24 +91,35 @@ export const updateUser = async (req: AuthRequest, res: Response): Promise<void>
       return;
     }
 
+    // ✅ Prevent admin role changes unless a super-admin is performing them
+    const targetUser = await getUser(userId);
+    if (!targetUser) {
+      res.status(404).json({ message: "❌ User not found" });
+      return;
+    }
+
+    if (role === "admin" && req.user.role !== "super-admin") {
+      res.status(403).json({ message: "❌ Only super-admins can assign admin roles." });
+      return;
+    }
+
     // ✅ Ensure users can only update their own profile unless they are admin
     if (req.user.role !== "admin" && String(req.user.id) !== userId) {
       res.status(403).json({ message: "❌ You can only update your own profile" });
       return;
     }
 
-    const updatedUser = await updateUserById(userId, req.body);
+    const updatedUser = await updateUserById(userId, req.body); // ✅ Ensure `userId` is passed as `string`
     logger.info(`✅ User ${req.user.id} updated profile of User ${userId}.`);
     res.json(updatedUser);
   } catch (error: unknown) {
-    const err = error as Error;
-    logger.error("❌ Error updating user:", err.message);
-    res.status(500).json({ message: "Error updating user", error: err.message });
+    logger.error("❌ Error updating user:", (error as Error).message);
+    res.status(500).json({ message: "Error updating user", error: (error as Error).message });
   }
 };
 
 /**
- * Deletes a user (Admin-only).
+ * Deletes a user (Admin-only). Admins cannot delete themselves.
  */
 export const deleteUser = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -127,12 +136,17 @@ export const deleteUser = async (req: AuthRequest, res: Response): Promise<void>
       return;
     }
 
-    await deleteUserById(userId);
+    // ✅ Prevent self-deletion for admins
+    if (String(req.user.id) === userId) {
+      res.status(403).json({ message: "❌ Admins cannot delete themselves" });
+      return;
+    }
+
+    await deleteUserById(userId); // ✅ Ensure `userId` is passed as `string`
     logger.info(`✅ Admin ${req.user.id} deleted User ${userId}.`);
     res.json({ message: "✅ User deleted successfully" });
   } catch (error: unknown) {
-    const err = error as Error;
-    logger.error("❌ Error deleting user:", err.message);
-    res.status(500).json({ message: "Error deleting user", error: err.message });
+    logger.error("❌ Error deleting user:", (error as Error).message);
+    res.status(500).json({ message: "Error deleting user", error: (error as Error).message });
   }
 };

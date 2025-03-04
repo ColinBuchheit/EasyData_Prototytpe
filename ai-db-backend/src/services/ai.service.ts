@@ -1,133 +1,174 @@
 import axios from "axios";
 import logger from "../config/logger";
 import { ENV } from "../config/env";
+import { pool } from "../config/db";
+import redisClient from "../config/redis"; // ✅ Import Redis Client
 
 const MAX_RETRIES = 3;
 const BACKOFF_DELAY = 2000; // 2 seconds
-
-// ✅ Simple in-memory cache for schema responses
-const schemaCache = new Map<string, any>();
+const schemaCache = new Map<string, { schema: any; timeout: NodeJS.Timeout }>();
 
 /**
- * Makes a request to the AI-Agent Network with retries.
+ * ✅ Listens for database schema changes.
  */
-async function requestAI(endpoint: string, payload: any): Promise<any> {
-  let attempt = 0;
-  while (attempt < MAX_RETRIES) {
-    try {
-      const response = await axios.post(
-        `${ENV.AI_AGENT_API}/${endpoint}`,
-        payload,
-        {
-          headers: {
-            "Content-Type": "application/json",
-            "api_key": ENV.AI_API_KEY,
-            "request_secret": ENV.BACKEND_SECRET,
-          },
-        }
-      );
+export async function listenForSchemaChanges() {
+  const client = await pool.connect();
+  client.query("LISTEN schema_changes"); // ✅ PostgreSQL `pg_notify` listener
 
-      if (response.data) {
-        logger.info(`✅ AI-Agent Response from ${endpoint}:`, response.data);
-        return response.data;
-      } else {
-        throw new Error("Invalid AI-Agent response.");
-      }
+  client.on("notification", async (msg) => {
+    logger.info(`🔄 Schema change detected: ${msg.payload}`);
+
+    // ✅ Ensure `msg.payload` is a valid JSON string before parsing
+    if (!msg.payload) {
+      logger.warn("⚠️ Received empty schema change notification.");
+      return;
+    }
+
+    try {
+      const { userId, dbType } = JSON.parse(msg.payload);
+
+      // ✅ Refresh schema cache dynamically
+      await fetchDatabaseSchema(userId, dbType, true); // Force refresh
+
+      logger.info(`✅ Schema refreshed for User ${userId} (${dbType})`);
     } catch (error) {
-      attempt++;
-      if (attempt >= MAX_RETRIES) {
-        logger.error(`❌ AI-Agent call failed after ${MAX_RETRIES} attempts.`);
-        throw error;
-      }
-      logger.warn(`⚠️ AI-Agent call to ${endpoint} failed (Attempt ${attempt}). Retrying...`);
-      await new Promise((resolve) => setTimeout(resolve, BACKOFF_DELAY * attempt));
+      logger.error("❌ Failed to parse schema change notification:", error);
+    }
+  });
+
+  logger.info("✅ Listening for schema changes...");
+}
+
+/**
+ * ✅ Fetches & caches database schema, refreshing only if needed.
+ */
+export async function fetchDatabaseSchema(userId: number, dbType: string, forceRefresh = false): Promise<any> {
+  const cacheKey = `schema:${userId}:${dbType}`;
+  if (!forceRefresh) {
+    const cachedSchema = await redisClient.get(cacheKey);
+    if (cachedSchema) {
+      logger.info("⚡ Using cached schema.");
+      return JSON.parse(cachedSchema);
     }
   }
+
+  logger.info("🔄 Fetching schema from database...");
+  const schemaQuery = `SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_schema = 'public';`;
+  const { rows } = await pool.query(schemaQuery);
+
+  await redisClient.set(cacheKey, JSON.stringify(rows), { EX: 3600 });
+  return rows;
 }
 
 /**
- * Requests a database session from AI-Agent.
+ * ✅ Generates an AI-powered SQL query with schema validation.
  */
-export async function requestDatabaseSession(
-  userId: number,
-  dbType: string,
-  authMethod: string,
-  host?: string,
-  port?: number,
-  username?: string,
-  password?: string
-): Promise<any> {
-  const payload: any = { userId, dbType, authMethod };
-
-  if (authMethod === "stored" && host && port && username && password) {
-    payload.host = host;
-    payload.port = port;
-    payload.username = username;
-    payload.password = password;
-  }
-
-  return await requestAI("request-session", payload);
-}
-
-/**
- * Retrieves the database schema using an AI-Agent session.
- * Implements schema caching to reduce redundant requests.
- */
-export async function fetchDatabaseSchema(sessionToken: string): Promise<any> {
-  if (schemaCache.has(sessionToken)) {
-    logger.info("⚡ Returning cached schema result.");
-    return schemaCache.get(sessionToken);
-  }
-
-  const schema = await requestAI("fetch-schema", { sessionToken });
-  schemaCache.set(sessionToken, schema); // ✅ Cache schema result
-  return schema;
-}
-
-/**
- * Validates if an AI-Agent session is still active.
- */
-export async function validateAISession(sessionToken: string): Promise<boolean> {
+export async function generateSQLQuery(userQuery: string, dbType: string, schema: any): Promise<string> {
   try {
-    const response = await requestAI("validate-session", { sessionToken });
-    return response.isValid;
+    logger.info(`🔍 Sending query generation request to AI-Agent Network for DB: ${dbType}`);
+    const response = await axios.post(
+      `${ENV.AI_AGENT_API}/generate-sql-query`,
+      { userQuery, dbType, schema },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "api_key": ENV.AI_API_KEY,
+          "request_secret": ENV.BACKEND_SECRET,
+          "origin": "backend-service"
+        },
+      }
+    );
+
+    if (!response.data || !response.data.sqlQuery) {
+      throw new Error("AI failed to generate a valid SQL query.");
+    }
+
+    logger.info(`✅ AI-Generated SQL Query: ${response.data.sqlQuery}`);
+    return response.data.sqlQuery;
   } catch (error) {
-    logger.warn("⚠️ AI-Agent session validation failed.");
+    const err = error as Error;
+    logger.error(`❌ AI failed to generate SQL query: ${err.message}`);
+    throw new Error("AI-Agent Network failed to generate a valid SQL query.");
+  }
+}
+
+/**
+ * ✅ Notifies the AI-Agent Network of an updated schema.
+ */
+export async function getSchemaForAI(userId: number, dbType: string): Promise<any> {
+  const schema = await fetchDatabaseSchema(userId, dbType);
+
+  try {
+    await axios.post(`${ENV.AI_AGENT_API}/update-schema`, {
+      userId,
+      dbType,
+      schema
+    }, {
+      headers: {
+        "Content-Type": "application/json",
+        "api_key": ENV.AI_API_KEY,
+        "request_secret": ENV.BACKEND_SECRET,
+      }
+    });
+    logger.info(`✅ Sent updated schema to AI-Agent Network for User ${userId} (${dbType})`);
+  } catch (error) {
+    logger.error("❌ Failed to update AI-Agent Network with schema:", error);
+  }
+
+  return { schema };
+}
+
+/**
+ * ✅ Refreshes schema when a user connects to a new database session.
+ */
+export async function refreshSchemaOnConnect(userId: number, dbType: string): Promise<void> {
+  try {
+    logger.info(`🔄 Refreshing schema for User ${userId} (${dbType})`);
+    await fetchDatabaseSchema(userId, dbType);
+    logger.info(`✅ Schema refreshed for User ${userId} (${dbType})`);
+  } catch (error) {
+    logger.error("❌ Failed to refresh schema on connect:", error);
+  }
+}
+
+/**
+ * ✅ Checks if the AI-Agent Network is responsive.
+ */
+export async function checkAIServiceHealth(): Promise<boolean> {
+  try {
+    const response = await axios.get(`${ENV.AI_AGENT_API}/health`);
+    return response.status === 200;
+  } catch (error) {
+    logger.warn("⚠️ AI-Agent Network is unresponsive.");
     return false;
   }
 }
 
 /**
- * Lists all active AI-Agent sessions.
+ * ✅ Lists all active AI-Agent sessions.
  */
 export async function listActiveAISessions(): Promise<any[]> {
-  return await requestAI("list-sessions", {});
+  try {
+    const response = await axios.get(`${ENV.AI_AGENT_API}/active-sessions`);
+    return response.data.sessions;
+  } catch (error) {
+    logger.error("❌ Failed to retrieve AI-Agent sessions.");
+    return [];
+  }
 }
 
 /**
- * Checks if the AI-Agent API is responsive.
- */
-export async function checkAIServiceHealth(): Promise<any> {
-  return await requestAI("check-health", {});
-}
-
-/**
- * Executes a query via the AI-Agent Network.
- */
-export async function executeAIQuery(userQuery: string, sessionToken: string): Promise<any> {
-  return await requestAI("execute-query", { userQuery, sessionToken });
-}
-
-/**
- * Disconnects a database session via AI-Agent.
- */
-export async function disconnectDatabaseSession(sessionToken: string): Promise<any> {
-  return await requestAI("disconnect-database", { sessionToken });
-}
-
-/**
- * Logs AI-Agent activity for debugging and tracking.
+ * ✅ Logs AI-Agent activity for debugging and tracking.
  */
 export async function logAIActivity(action: string, details?: any): Promise<void> {
-  await requestAI("log-activity", { action, details });
+  await axios.post(`${ENV.AI_AGENT_API}/log-activity`, {
+    action,
+    details
+  }, {
+    headers: {
+      "Content-Type": "application/json",
+      "api_key": ENV.AI_API_KEY,
+      "request_secret": ENV.BACKEND_SECRET,
+    }
+  });
 }
