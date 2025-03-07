@@ -39,6 +39,7 @@ router.post("/register", registerLimiter, async (req, res, next) => {
     await register(req, res);
     logger.info(`✅ New user registered: ${req.body.username}`);
   } catch (error) {
+    logger.error(`❌ Registration failed for ${req.body.username}`);
     next(error);
   }
 });

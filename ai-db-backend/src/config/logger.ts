@@ -75,10 +75,10 @@ async function flushLogs() {
   logBuffer.length = 0; // ✅ Clear buffer after copying
 
   try {
-    const values = logsToInsert.map((log) => `('${log.level}', '${log.message}', NOW())`).join(",");
-    await pool.query(`INSERT INTO logs (level, message, timestamp) VALUES ${values}`);
+    const query = "INSERT INTO logs (level, message, timestamp) VALUES ($1, $2, NOW())";
+    await Promise.all(logsToInsert.map(log => pool.query(query, [log.level, log.message])));
   } catch (err) {
-    console.error("❌ Failed to batch log messages to database:", err);
+    logger.error(`❌ Failed to batch log messages: ${(err as Error).message}`);
   }
 }
 
@@ -91,6 +91,12 @@ logger.on("data", (log) => {
     logToDatabase(log.level, log.message);
   }
 });
+
+process.on("exit", async () => {
+  await flushLogs();
+  logger.info("✅ Logs flushed before exit.");
+});
+
 
 export { logger, logToDatabase };
 export default logger;

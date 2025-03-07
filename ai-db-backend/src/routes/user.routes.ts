@@ -32,9 +32,9 @@ router.get("/", authorizeRoles(["admin"]), userLimiter, async (req: AuthRequest,
 });
 
 // ✅ GET specific user (Admins or self)
-router.get("/:id", authorizeRoles(["admin", "user"]), userLimiter, async (req: AuthRequest, res) => {
+router.get("/:id", userLimiter, async (req: AuthRequest, res) => {
   const userId = req.params.id;
-  
+
   if (req.user.role !== "admin" && req.user.id !== Number(userId)) {
     logger.warn(`🚫 Unauthorized access attempt by User ${req.user.id} to User ${userId}`);
     res.status(403).json({ error: "You are not allowed to view this profile." });
@@ -61,6 +61,7 @@ router.put("/:id", async (req: AuthRequest, res) => {
   }
 
   if (req.user.role !== "admin" && req.user.id !== Number(userId)) {
+    logger.warn(`🚫 Unauthorized update attempt by User ${req.user.id} on User ${userId}`);
     res.status(403).json({ error: "You can only update your own profile." });
     return;
   }
@@ -71,7 +72,7 @@ router.put("/:id", async (req: AuthRequest, res) => {
 
 // ✅ DELETE user (Admin-only)
 router.delete("/:id", authorizeRoles(["admin"]), async (req: AuthRequest, res) => {
-  logger.info(`⚠️ Admin ${req.user.id} deleted User ${req.params.id}`);
+  logger.warn(`⚠️ Admin ${req.user.id} deleted User ${req.params.id}`);
   await deleteUser(req, res);
 });
 

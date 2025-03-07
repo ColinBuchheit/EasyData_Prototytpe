@@ -1,8 +1,12 @@
 // src/config/swagger.ts
 import swaggerJSDoc from "swagger-jsdoc";
 import { ENV } from "./env";
+import fs from "fs";
 
-// ✅ Determine API base URL dynamically based on environment
+// ✅ Ensure NODE_ENV is always defined
+const NODE_ENV = process.env.NODE_ENV || "development";
+
+// ✅ Dynamically configure API servers based on environment
 const servers = [
   {
     url: `http://localhost:${ENV.PORT}`,
@@ -10,18 +14,22 @@ const servers = [
   },
 ];
 
-// ✅ Add staging & production servers dynamically
-if (process.env.NODE_ENV === "staging") {
+if (NODE_ENV === "staging") {
   servers.push({
     url: "https://staging-api.easydata.com",
     description: "Staging Server",
   });
-} else if (process.env.NODE_ENV === "production") {
+} else if (NODE_ENV === "production") {
   servers.push({
     url: "https://api.easydata.com",
     description: "Production Server",
   });
 }
+
+// ✅ Validate `apis` paths before using them
+const apiPaths = ["./src/routes/v1/*.ts", "./src/controllers/v1/*.ts"].filter((path) =>
+  fs.existsSync(path)
+);
 
 const options = {
   swaggerDefinition: {
@@ -43,11 +51,14 @@ const options = {
     },
     security: [
       {
-        bearerAuth: [],
+        bearerAuth: [], // 🔹 Required auth endpoints
+      },
+      {
+        bearerAuth: ["optional"], // 🔹 Allows optional authentication (for public routes)
       },
     ],
   },
-  apis: ["./src/routes/v1/*.ts", "./src/controllers/v1/*.ts"], // ✅ API versioning
+  apis: apiPaths.length > 0 ? apiPaths : [], // ✅ Prevent Swagger from breaking on missing files
 };
 
 const swaggerSpec = swaggerJSDoc(options);

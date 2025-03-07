@@ -1,6 +1,6 @@
 // src/routes/query.routes.ts
 import { Router, Response } from "express";
-import { generateSQLQuery, fetchDatabaseSchema } from "../services/ai.service"; 
+import { generateSQLQuery, generateNoSQLQuery, fetchDatabaseSchema } from "../services/ai.service"; 
 import { verifyToken, AuthRequest } from "../middleware/auth"; 
 import { ConnectionManager } from "../services/connectionmanager"; 
 import { pool } from "../config/db";
@@ -28,7 +28,7 @@ router.post("/query", verifyToken, queryLimiter, async (req: AuthRequest, res: R
     const { user_query, db_type } = req.body;
     const userId = req.user.id;
 
-    const validDbTypes = ["postgres", "mysql", "mssql", "sqlite"];
+    const validDbTypes = ["postgres", "mysql", "mssql", "sqlite", "mongo", "firebase", "couchdb", "dynamodb"];
     if (!db_type || !validDbTypes.includes(db_type)) {
       res.status(400).json({ error: "❌ Invalid or missing database type." });
       return;
@@ -45,9 +45,6 @@ router.post("/query", verifyToken, queryLimiter, async (req: AuthRequest, res: R
       return;
     }
 
-    // ✅ Get connection manager instance with `dbType`
-    const connectionManager = ConnectionManager.getInstance(userId, db_type);
-
     // ✅ Fetch Schema from AI service
     logger.info(`🔍 Fetching schema for user ${userId}, database type: ${db_type}`);
     const schema = await fetchDatabaseSchema(userId, db_type);
@@ -59,26 +56,38 @@ router.post("/query", verifyToken, queryLimiter, async (req: AuthRequest, res: R
 
     logger.info(`✅ Schema retrieved for user ${userId}`);
 
-    // ✅ Generate SQL Query
-    logger.info(`🔍 Generating SQL query for user ${userId}: ${user_query}`);
-    const sqlQuery = await generateSQLQuery(user_query, db_type, schema);
-
-    if (!sqlQuery || typeof sqlQuery !== "string") {
-      throw new Error("AI service returned an invalid response.");
+    // ✅ Generate Query
+    let aiQuery;
+    if (["mongo", "firebase", "couchdb", "dynamodb"].includes(db_type)) {
+      aiQuery = await generateNoSQLQuery(user_query, db_type, schema);
+    } else {
+      aiQuery = await generateSQLQuery(user_query, db_type, schema);
     }
 
-    // ✅ Security Check: Only allow SELECT queries
-    if (!sqlQuery.trim().toUpperCase().startsWith("SELECT")) {
+    if (!aiQuery || typeof aiQuery !== "string") {
+      res.status(500).json({ error: "❌ AI service returned an invalid response." });
+      return;
+    }
+
+    // ✅ Security Check: Only allow SELECT queries for SQL databases
+    if (["postgres", "mysql", "mssql", "sqlite"].includes(db_type) && !aiQuery.trim().toUpperCase().startsWith("SELECT")) {
       res.status(403).json({ error: "❌ Only SELECT queries are allowed." });
       return;
     }
 
-    logger.info(`✅ AI-Generated SQL for user ${userId}: ${sqlQuery}`);
+    logger.info(`✅ AI-Generated Query for user ${userId}: ${aiQuery}`);
 
     // ✅ Execute Query
-    const result = await pool.query(sqlQuery);
+    let result;
+    if (["mongo", "firebase", "couchdb", "dynamodb"].includes(db_type)) {
+      result = await ConnectionManager.executeNoSQLQuery(userId, db_type, aiQuery);
+    } else {
+      result = await pool.query(aiQuery);
+    }
 
-    res.json({ success: true, data: result.rows });
+    logger.info(`✅ Executed query for user ${userId}: ${aiQuery}`);
+
+    res.json({ success: true, data: result.rows || result });
   } catch (error: unknown) {
     const err = error as Error;
     logger.error(`❌ Query Execution Failed: ${err.message}`);

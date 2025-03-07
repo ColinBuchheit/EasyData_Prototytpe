@@ -24,7 +24,7 @@ const router = Router();
 router.post("/connect", verifyToken, requireRole(["admin"]), async (req: AuthRequest, res) => {
   try {
     const { dbType } = req.body;
-    const validDbTypes = ["postgres", "mysql", "mssql", "sqlite"];
+    const validDbTypes = ["postgres", "mysql", "mssql", "sqlite", "mongo", "firebase", "couchdb", "dynamodb"];
 
     if (!dbType || !validDbTypes.includes(dbType)) {
       res.status(400).json({ message: "❌ Invalid or missing database type." });
@@ -76,7 +76,7 @@ router.get("/schema", verifyToken, async (req: AuthRequest, res) => {
  *     summary: Close a database session
  *     tags: [Database]
  */
-router.post("/connect", verifyToken, requireRole(["admin"]), async (req: AuthRequest, res) => {
+router.post("/disconnect", verifyToken, requireRole(["admin"]), async (req: AuthRequest, res) => {
   try {
     const { sessionToken } = req.body;
 
@@ -90,7 +90,7 @@ router.post("/connect", verifyToken, requireRole(["admin"]), async (req: AuthReq
     res.json({ message: "✅ Database session closed." });
   } catch (error) {
     logger.error("❌ Failed to close database session:", (error as Error).message);
-    res.status(500).json({ message: "Failed to close database session.", error: (error as Error).message });
+    res.status(500).json({ message: "Failed to close session.", error: (error as Error).message });
   }
 });
 
@@ -100,7 +100,7 @@ router.post("/connect", verifyToken, requireRole(["admin"]), async (req: AuthReq
  *   get:
  *     summary: Lists all active AI-Agent sessions (Admin-only)
  */
-router.post("/connect", verifyToken, requireRole(["admin"]), async (req: AuthRequest, res) => {
+router.get("/sessions", verifyToken, requireRole(["admin"]), async (req: AuthRequest, res) => {
   try {
     const sessions = await listActiveAISessions();
     logger.info(`✅ Retrieved ${sessions.length} active AI-Agent sessions`);

@@ -6,7 +6,6 @@ import { AuthRequest } from "../middleware/auth";
 import { ConnectionManager } from "../services/connectionmanager"; // ✅ Manages user connections
 import { fetchCloudCredentials } from "../services/cloudAuth.service"; // ✅ Ensure credentials retrieval
 
-
 /**
  * Stores a new user database connection securely.
  */
@@ -21,6 +20,17 @@ export const addUserDatabase = async (req: AuthRequest, res: Response): Promise<
 
     if (!["stored"].includes(auth_method)) {
       res.status(400).json({ message: "❌ Invalid auth_method. Only 'stored' is supported." });
+      return;
+    }
+
+    // ✅ Prevent duplicate database connections
+    const existingDb = await pool.query(
+      "SELECT id FROM user_databases WHERE user_id = $1 AND database_name = $2",
+      [user_id, database_name]
+    );
+
+    if (existingDb.rows.length > 0) {
+      res.status(400).json({ message: "❌ This database is already linked to your account." });
       return;
     }
 
@@ -39,7 +49,7 @@ export const addUserDatabase = async (req: AuthRequest, res: Response): Promise<
     logger.info(`✅ User database stored securely for user ${user_id}`);
     res.status(201).json({ message: "✅ Database added successfully.", auth_method });
   } catch (error: unknown) {
-    logger.error("❌ Error saving database credentials:", (error as Error).message);
+    logger.error(`❌ Error saving database credentials: ${(error as Error).message}`);
     res.status(500).json({ message: "Failed to save database credentials.", details: (error as Error).message });
   }
 };
@@ -58,22 +68,26 @@ export const connectUserDatabase = async (req: AuthRequest, res: Response): Prom
     }
 
     // ✅ Fetch credentials securely
-    const credentials = await fetchCloudCredentials(userId, dbType, cloudProvider);
+    const credentials = await fetchCloudCredentials(userId, dbType);
     if (!credentials) {
       res.status(401).json({ message: "❌ Unauthorized: No credentials found." });
       return;
     }
 
-    // ✅ Ensure ConnectionManager gets credentials
-    const connectionManager = new ConnectionManager(userId, dbType, credentials);
+    let connectionManager;
+    if (["mongo", "firebase", "couchdb", "dynamodb"].includes(dbType)) {
+      connectionManager = new ConnectionManager(userId, dbType, { session: true }); // ✅ NoSQL Sessions
+    } else {
+      connectionManager = new ConnectionManager(userId, dbType, credentials);
+    }
+
     await connectionManager.connect(credentials);
 
     logger.info(`✅ User ${userId} connected to ${dbType}`);
     res.json({ message: `✅ Successfully connected to ${dbType}` });
   } catch (error) {
-    const err = error as Error;
-    logger.error(`❌ Database connection failed: ${err.message}`);
-    res.status(500).json({ message: "Database connection failed", error: err.message });
+    logger.error(`❌ Database connection failed: ${(error as Error).message}`);
+    res.status(500).json({ message: "Database connection failed" });
   }
 };
 
@@ -90,14 +104,19 @@ export const disconnectUserDatabase = async (req: AuthRequest, res: Response): P
       return;
     }
 
-    // ✅ Use Singleton ConnectionManager
-    const connectionManager = ConnectionManager.getInstance(userId, db_type);
+    if (!ConnectionManager.isConnected(userId, db_type)) {
+      logger.warn(`⚠️ User ${userId} attempted to disconnect from ${db_type}, but no active session exists.`);
+      res.status(400).json({ message: "❌ No active database connection to disconnect." });
+      return;
+    }
+
+    const connectionManager = new ConnectionManager(userId, db_type, {});
     await connectionManager.disconnect();
 
     logger.info(`✅ User ${userId} disconnected from ${db_type}`);
     res.json({ message: `✅ Successfully disconnected from ${db_type}` });
   } catch (error: unknown) {
-    logger.error(`❌ Disconnection failed:`, (error as Error).message);
+    logger.error(`❌ Disconnection failed: ${(error as Error).message}`);
     res.status(500).json({ message: "Failed to disconnect from database.", details: (error as Error).message });
   }
 };
@@ -119,10 +138,10 @@ export const getUserDatabases = async (req: AuthRequest, res: Response): Promise
       return;
     }
 
-    logger.info(`✅ Retrieved databases for user ${userId}.`);
+    logger.info(`✅ Retrieved databases for user ${userId}`);
     res.status(200).json(rows);
   } catch (error: unknown) {
-    logger.error("❌ Error retrieving user databases:", (error as Error).message);
+    logger.error(`❌ Error retrieving user databases: ${(error as Error).message}`);
     res.status(500).json({ message: "Failed to retrieve databases.", details: (error as Error).message });
   }
 };
@@ -135,10 +154,7 @@ export const deleteUserDatabase = async (req: AuthRequest, res: Response): Promi
     const { id } = req.params;
     const userId = req.user.id;
 
-    const { rows } = await pool.query(
-      "SELECT user_id FROM user_databases WHERE id = $1",
-      [id]
-    );
+    const { rows } = await pool.query("SELECT user_id FROM user_databases WHERE id = $1", [id]);
 
     if (rows.length === 0) {
       res.status(404).json({ message: "❌ Database connection not found." });
@@ -157,7 +173,7 @@ export const deleteUserDatabase = async (req: AuthRequest, res: Response): Promi
     logger.info(`✅ Database connection ${id} deleted by user ${userId}`);
     res.status(200).json({ message: "✅ Database connection deleted successfully." });
   } catch (error: unknown) {
-    logger.error("❌ Error deleting database connection:", (error as Error).message);
+    logger.error(`❌ Error deleting database connection: ${(error as Error).message}`);
     res.status(500).json({ message: "Failed to delete database connection.", details: (error as Error).message });
   }
 };

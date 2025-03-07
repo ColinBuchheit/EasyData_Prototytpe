@@ -6,26 +6,24 @@ import logger from "../config/logger";
 const keyVaultName = process.env.AZURE_KEY_VAULT_NAME || "my-keyvault";
 const vaultUrl = `https://${keyVaultName}.vault.azure.net`;
 const credential = new DefaultAzureCredential();
-const client = new SecretClient(vaultUrl, credential);
+const azureClient = new SecretClient(vaultUrl, credential);
 
 /**
- * Fetches database credentials securely from Azure Key Vault.
+ * ✅ Fetches database credentials securely from Azure Key Vault.
  */
-export async function fetchCloudCredentials(userId: number, dbType: string, cloudProvider: string): Promise<any | null> {
+export async function fetchCloudCredentials(userId: number, dbType: string): Promise<any | null> {
   try {
-    if (cloudProvider === "azure") {
-      const secretName = `db-credentials-${userId}-${dbType}`;
-      const secret = await client.getSecret(secretName);
+    const secretName = `db-credentials-${userId}-${dbType}`;
+    const secret = await azureClient.getSecret(secretName);
 
-      if (secret.value) {
-        return JSON.parse(secret.value);
-      }
+    if (!secret.value) {
+      logger.warn(`⚠️ No secret value found for ${secretName}`);
+      return null;
     }
-    
-    logger.error(`❌ Unsupported cloud provider: ${cloudProvider}`);
-    return null;
+
+    return JSON.parse(secret.value);
   } catch (error) {
-    logger.error(`❌ Failed to fetch credentials from Azure Key Vault: ${error}`);
+    logger.error(`❌ Failed to fetch Azure credentials for ${dbType}:`, error);
     return null;
   }
 }

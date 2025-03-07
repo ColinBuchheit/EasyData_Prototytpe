@@ -4,7 +4,9 @@ import logger from '../config/logger';
 const ALGORITHM = 'aes-256-cbc';
 
 // ✅ Ensure the encryption key is exactly 32 bytes
-const SECRET_KEY = crypto.createHash('sha256').update(process.env.ENCRYPTION_KEY || '').digest();
+const SECRET_KEY = crypto.createHash('sha256')
+  .update(process.env.ENCRYPTION_KEY || '')
+  .digest().slice(0, 32); // ✅ Explicitly enforce 32 bytes
 
 /**
  * Encrypts a given text using AES-256-CBC.
@@ -19,7 +21,7 @@ export const encrypt = (text: string): string => {
     encrypted += cipher.final('hex');
     return `${iv.toString('hex')}:${encrypted}`;
   } catch (error) {
-    logger.error("❌ Encryption failed:", error);
+    logger.error(`❌ Encryption failed: ${(error as Error).message}`);
     throw new Error("Encryption error. Please try again.");
   }
 };
@@ -31,8 +33,13 @@ export const encrypt = (text: string): string => {
  */
 export const decrypt = (encryptedText: string): string => {
   try {
-    const [iv, encrypted] = encryptedText.split(':');
-
+    const parts = encryptedText.split(':');
+    if (parts.length !== 2) {
+      throw new Error("Invalid encrypted text format.");
+    }
+    
+    const [iv, encrypted] = parts;
+    
     // ✅ Validate IV length
     if (Buffer.from(iv, 'hex').length !== 16) {
       throw new Error("Invalid IV length. Expected 16 bytes.");

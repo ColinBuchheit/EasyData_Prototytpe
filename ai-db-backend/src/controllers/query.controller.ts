@@ -1,6 +1,6 @@
 import { AuthRequest } from "../middleware/auth";
 import { Response } from "express";
-import { generateSQLQuery, fetchDatabaseSchema } from "../services/ai.service"; // ✅ Uses AI for schema & query
+import { generateSQLQuery, generateNoSQLQuery, fetchDatabaseSchema } from "../services/ai.service"; // ✅ Uses AI for schema & query
 import { ConnectionManager } from "../services/connectionmanager";
 import { pool } from "../config/db";
 import logger from "../config/logger";
@@ -40,32 +40,40 @@ export const processQuery = async (req: AuthRequest, res: Response): Promise<voi
 
     logger.info(`✅ Schema retrieved for user ${userId}`);
 
-    // ✅ Generate SQL Query
-    logger.info(`🔍 Generating SQL query for user ${userId}: ${user_query}`);
-    const sqlQuery = await generateSQLQuery(user_query, db_type, schema);
+    // ✅ Generate Query (SQL or NoSQL)
+    let aiQuery;
+    if (["mongo", "firebase", "couchdb", "dynamodb"].includes(db_type)) {
+      aiQuery = await generateNoSQLQuery(user_query, db_type, schema); // ✅ NoSQL Query Generation
+    } else {
+      aiQuery = await generateSQLQuery(user_query, db_type, schema); // ✅ SQL Query Generation
+    }
 
-    if (!sqlQuery || typeof sqlQuery !== "string") {
+    if (!aiQuery || typeof aiQuery !== "object") {
       throw new Error("AI service returned an invalid response.");
     }
 
-    // ✅ Security Check: Only allow SELECT queries
-    if (!sqlQuery.trim().toUpperCase().startsWith("SELECT")) {
-      res.status(403).json({ error: "❌ Only SELECT queries are allowed." });
-      return;
-    }
-
-    logger.info(`✅ AI-Generated SQL for user ${userId}: ${sqlQuery}`);
+    logger.info(`✅ AI-Generated Query for user ${userId}: ${JSON.stringify(aiQuery)}`);
 
     // ✅ Validate the query against the schema before executing
-    if (!validateSQLAgainstSchema(sqlQuery, schema)) {
+    if (!validateQueryAgainstSchema(aiQuery, schema, db_type)) {
       res.status(400).json({ error: "❌ AI-Generated query does not match schema constraints." });
       return;
     }
 
     // ✅ Execute Query
-    const result = await pool.query(sqlQuery);
+    let result;
+    if (["mongo", "firebase", "couchdb", "dynamodb"].includes(db_type)) {
+      result = await ConnectionManager.executeNoSQLQuery(userId, db_type, aiQuery);
+    } else {
+      // ✅ Security Check: Only allow SELECT queries for SQL
+      if (!aiQuery.query.trim().toUpperCase().startsWith("SELECT")) {
+        res.status(403).json({ error: "❌ Only SELECT queries are allowed." });
+        return;
+      }
+      result = await pool.query(aiQuery.query);
+    }
 
-    res.json({ success: true, data: result.rows });
+    res.json({ success: true, data: result.rows || result });
   } catch (error: unknown) {
     const err = error as Error;
     logger.error(`❌ Query Execution Failed: ${err.message}`);
@@ -74,18 +82,37 @@ export const processQuery = async (req: AuthRequest, res: Response): Promise<voi
 };
 
 /**
- * Validates the AI-generated SQL query against the database schema.
+ * Validates the AI-generated query against the database schema.
  */
-function validateSQLAgainstSchema(sqlQuery: string, schema: any[]): boolean {
+function validateQueryAgainstSchema(query: any, schema: any[], dbType: string): boolean {
+  if (["mongo", "firebase", "couchdb", "dynamodb"].includes(dbType)) {
+    // ✅ NoSQL Schema Validation
+    const validCollections = new Set(schema.map((item) => item.collection));
+    if (typeof query === "string") {
+      return validCollections.has(query); // ✅ If query is a collection name string
+    } else if (typeof query === "object" && query !== null && "collection" in query) {
+      return validCollections.has(query.collection as string); // ✅ If query object has `collection`
+    }
+    return false; // ✅ Query does not match any valid collection
+  }
+
+  // ✅ SQL Schema Validation
   const tables = new Set(schema.map((item) => item.table_name.toLowerCase()));
-  const columns = new Set(schema.map((item) => `${item.table_name.toLowerCase()}.${item.column_name.toLowerCase()}`));
+  const columns = new Set(
+    schema.map((item) => `${item.table_name.toLowerCase()}.${item.column_name.toLowerCase()}`)
+  );
   const columnDataTypes = new Map(
     schema.map((item) => [`${item.table_name.toLowerCase()}.${item.column_name.toLowerCase()}`, item.data_type])
   );
 
-  // ✅ Extract table & column names from the query (Handles Aliases & JOINs)
-  const usedTables = Array.from(sqlQuery.matchAll(/\bFROM\s+([a-zA-Z_][\w]*)/gi)).map((match) => match[1].toLowerCase());
-  const usedColumns = Array.from(sqlQuery.matchAll(/\bSELECT\s+(.*?)\bFROM/gi)).map((match) => match[1].toLowerCase());
+  // ✅ Extract table & column names from the query
+const usedTables = Array.from(query.matchAll(/\bFROM\s+([a-zA-Z_][\w]*)/gi))
+.map((match) => (match as RegExpMatchArray)[1]?.toLowerCase() || "");
+
+const usedColumns = Array.from(query.matchAll(/\bSELECT\s+(.*?)\bFROM/gi))
+.map((match) => (match as RegExpMatchArray)[1]?.toLowerCase() || "");
+
+
 
   // ✅ Ensure all referenced tables exist
   for (const table of usedTables) {

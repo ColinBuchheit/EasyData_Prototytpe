@@ -5,16 +5,16 @@ import {
   getUserDatabases,
   deleteUserDatabase
 } from "../controllers/userdb.controller";
-import { AuthRequest, verifyToken } from "../middleware/auth"; // ✅ Ensure `AuthRequest` is imported
-import { authorizeRoles } from "../middleware/rbac";
+import { AuthRequest, verifyToken } from "../middleware/auth";
 import rateLimit from "express-rate-limit";
-import { Request, Response } from "express";
 import logger from "../config/logger";
 import { ConnectionManager } from "../services/connectionmanager";
-import { fetchCloudCredentials } from "../services/cloudAuth.service"; // ✅ Ensure credentials retrieval
-
+import { fetchCloudCredentials } from "../services/cloudAuth.service";
 
 const router = Router();
+
+const RELATIONAL_DBS = new Set(["postgres", "mysql", "mssql", "sqlite"]);
+const NOSQL_DBS = new Set(["mongodb", "firebase", "dynamodb", "couchdb"]);
 
 /**
  * @swagger
@@ -34,7 +34,7 @@ const databaseLimiter = rateLimit({
  * @swagger
  * /api/databases:
  *   post:
- *     summary: Store a new database connection securely with authentication method selection
+ *     summary: Store a new database connection securely with authentication method selection (Supports SQL & NoSQL)
  *     tags: [UserDatabases]
  */
 router.post("/databases", verifyToken, databaseLimiter, addUserDatabase);
@@ -43,10 +43,10 @@ router.post("/databases", verifyToken, databaseLimiter, addUserDatabase);
  * @swagger
  * /api/databases/{user_id}:
  *   get:
- *     summary: Retrieve all database connections for a user (Admins or Self)
+ *     summary: Retrieve all database connections for a user (Admins or Self, Supports SQL & NoSQL)
  *     tags: [UserDatabases]
  */
-router.get("/databases/:user_id", verifyToken, authorizeRoles(["admin", "user"]), databaseLimiter, async (req: AuthRequest, res) => {
+router.get("/databases/:user_id", verifyToken, databaseLimiter, async (req: AuthRequest, res) => {
   const userId = Number(req.params.user_id);
 
   if (req.user.role !== "admin" && req.user.id !== userId) {
@@ -63,13 +63,13 @@ router.get("/databases/:user_id", verifyToken, authorizeRoles(["admin", "user"])
  * @swagger
  * /api/databases/{id}:
  *   delete:
- *     summary: Delete a database connection (Admins or Owner)
+ *     summary: Delete a database connection (Admins or Owner, Supports SQL & NoSQL)
  *     tags: [UserDatabases]
  */
-router.delete("/databases/:id", verifyToken, authorizeRoles(["admin", "user"]), databaseLimiter, async (req: AuthRequest, res) => {
+router.delete("/databases/:id", verifyToken, databaseLimiter, async (req: AuthRequest, res) => {
   const dbId = req.params.id;
 
-  logger.info(`⚠️ User ${req.user.id} is deleting database ${dbId}`);
+  logger.warn(`⚠️ User ${req.user.id} is deleting database ${dbId}`);
   await deleteUserDatabase(req, res);
 });
 
@@ -77,15 +77,25 @@ router.delete("/databases/:id", verifyToken, authorizeRoles(["admin", "user"]), 
  * @swagger
  * /api/databases/connect:
  *   post:
- *     summary: Connect to a database manually
+ *     summary: Connect to a database manually (Supports SQL & NoSQL)
  *     tags: [UserDatabases]
  */
-router.post("/connect", verifyToken, async (req: AuthRequest, res) => { // ✅ Fix applied
+router.post("/databases/connect", verifyToken, async (req: AuthRequest, res) => {
   try {
     const { dbType, cloudProvider } = req.body;
-    const userId = req.user.id; // ✅ Now TypeScript knows `user` exists
+    const userId = req.user.id;
 
-    const credentials = await fetchCloudCredentials(userId, dbType, cloudProvider);
+    if (!dbType) {
+      res.status(400).json({ message: "❌ Missing database type." });
+      return;
+    }
+
+    if (!RELATIONAL_DBS.has(dbType) && !NOSQL_DBS.has(dbType)) {
+      res.status(400).json({ message: "❌ Unsupported database type." });
+      return;
+    }
+
+    const credentials = await fetchCloudCredentials(userId, dbType);
     if (!credentials) {
       res.status(401).json({ message: "❌ Unauthorized: No credentials found." });
       return;
@@ -94,38 +104,45 @@ router.post("/connect", verifyToken, async (req: AuthRequest, res) => { // ✅ F
     const connectionManager = new ConnectionManager(userId, dbType, credentials);
     await connectionManager.connect(credentials);
 
+    logger.info(`✅ User ${userId} successfully connected to ${dbType}`);
     res.json({ message: "✅ Successfully connected to database." });
   } catch (error) {
-    res.status(500).json({ message: "Database connection failed.", error });
+    logger.error(`❌ Database connection failed for User ${req.user.id}:`, error);
+    res.status(500).json({ message: "Database connection failed.", error: (error as Error).message });
   }
 });
-
-
-
 
 /**
  * @swagger
  * /api/databases/disconnect:
  *   post:
- *     summary: Disconnect from a database manually
+ *     summary: Disconnect from a database manually (Supports SQL & NoSQL)
  *     tags: [UserDatabases]
  */
-router.post("/databases/disconnect", verifyToken, async (req: AuthRequest, res: Response) => {
+router.post("/databases/disconnect", verifyToken, async (req: AuthRequest, res) => {
   try {
-    const { db_type } = req.body;
+    const { dbType } = req.body;
     const userId = req.user.id;
 
-    const connectionManager = ConnectionManager.getInstance(userId, db_type);
+    if (!dbType) {
+      res.status(400).json({ message: "❌ Database type is required." });
+      return;
+    }
+
+    if (!RELATIONAL_DBS.has(dbType) && !NOSQL_DBS.has(dbType)) {
+      res.status(400).json({ message: "❌ Unsupported database type." });
+      return;
+    }
+
+    const connectionManager = new ConnectionManager(userId, dbType, {});
     await connectionManager.disconnect();
 
-    logger.info(`✅ User ${userId} disconnected from ${db_type}`);
-    res.json({ message: `Successfully disconnected from ${db_type}` });
+    logger.info(`✅ User ${userId} disconnected from ${dbType}`);
+    res.json({ message: `✅ Successfully disconnected from ${dbType}` });
   } catch (error) {
     logger.error(`❌ Disconnection failed for User ${req.user.id}:`, error);
-    res.status(500).json({ error: "Failed to disconnect from database." });
+    res.status(500).json({ error: "❌ Failed to disconnect from database.", details: (error as Error).message });
   }
 });
-
-
 
 export default router;

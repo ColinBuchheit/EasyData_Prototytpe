@@ -6,11 +6,6 @@ import RedisMock from "ioredis-mock"; // ✅ Mock Redis for local development
 
 const MAX_CONNECTIONS = Number(process.env.DB_MAX_CONNECTIONS) || 10; // ✅ Configurable
 
-// ✅ Ensure DB_TYPE is included for multi-DB support (future-proofing)
-if (!ENV.DB_TYPE) {
-  logger.error("❌ Missing DB_TYPE in environment variables.");
-  process.exit(1);
-}
 
 // ✅ Start Redis (Use `ioredis-mock` in Dev, Real Redis in Prod/Docker)
 const redisClient =
@@ -70,6 +65,20 @@ pool.on("error", (err: Error) => {
   logger.error(`❌ Unexpected database error: ${err.message}`);
 });
 
+const checkDatabaseHealth = async () => {
+  setInterval(async () => {
+    try {
+      await pool.query("SELECT 1");
+      logger.info("✅ Database is healthy.");
+    } catch (err) {
+      logger.error("⚠️ Database connection lost! Attempting to reconnect...");
+      await connectWithRetry();
+    }
+  }, 60000); // Check every 60 seconds
+};
+checkDatabaseHealth();
+
+
 // 🔹 Close Pool on App Shutdown (Graceful Exit)
 const closeDatabase = async () => {
   logger.info("⚠️ Closing database connection...");
@@ -78,7 +87,21 @@ const closeDatabase = async () => {
   process.exit(0);
 };
 
-process.on("SIGINT", closeDatabase);
-process.on("SIGTERM", closeDatabase);
+const closeRedis = async () => {
+  logger.info("⚠️ Closing Redis connection...");
+  await redisClient.quit();
+  logger.info("✅ Redis connection closed.");
+};
+
+process.on("SIGINT", async () => {
+  await closeRedis();
+  await closeDatabase();
+});
+process.on("SIGTERM", async () => {
+  await closeRedis();
+  await closeDatabase();
+});
+
+
 
 export { pool, redisClient }; // ✅ Export Redis client for use in other files

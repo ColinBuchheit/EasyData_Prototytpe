@@ -4,6 +4,8 @@ import { ENV } from "./config/env";
 import { pool } from "./config/db"; // ✅ Fixes TS2613
 import logger from "./config/logger";
 import { ConnectionManager } from "./services/connectionmanager";
+import dotenv from "dotenv";
+dotenv.config(); 
 
 const PORT = ENV.PORT || 5000;
 const server = http.createServer(app);

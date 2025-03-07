@@ -1,6 +1,7 @@
 from crewai import Agent
 import re
 import logging
+import json
 from models.llm_integration import LLMIntegration
 
 # Secure Logging Setup
@@ -27,6 +28,8 @@ class ValidationSecurityAgent(Agent):
             re.compile(r"\bWAITFOR\s+DELAY\b", re.IGNORECASE),  # Time-delay attack
             re.compile(r"\bOR\s+1=1\b", re.IGNORECASE),  # Boolean-based injection
             re.compile(r"\b;--\b|\b;\s*DROP\s+TABLE\b", re.IGNORECASE),  # Command chaining
+            re.compile(r"\bEXEC\b|\bXP_CMDSHELL\b", re.IGNORECASE),  # Command execution attacks
+            re.compile(r"\bCAST\(\s*[\d\w]+\s+AS\s+\w+\)", re.IGNORECASE),  # Data type conversion
         ]
 
     def validate_sql(self, sql_query: str, schema: dict) -> bool:
@@ -40,7 +43,6 @@ class ValidationSecurityAgent(Agent):
         Returns:
             bool: True if the query is valid, False otherwise.
         """
-
         logger.info(f"🔍 Validating SQL Query:\n{sql_query}")
 
         # ✅ 1. Enforce SELECT-Only Queries
@@ -105,13 +107,18 @@ class ValidationSecurityAgent(Agent):
         Returns:
             bool: True if column names are valid, False otherwise.
         """
-        for table, columns in schema.items():
-            for column in re.findall(r"SELECT\s+(.*?)\s+FROM", sql_query, re.IGNORECASE):
-                column_names = [col.strip().lower() for col in column.split(",")]
-                for col in column_names:
-                    if col != "*" and col not in columns:
-                        self.log_security_incident(sql_query, f"Column '{col}' not found in table '{table}'.")
+        column_pattern = re.compile(r"SELECT\s+(.*?)\s+FROM", re.IGNORECASE)
+        match = column_pattern.search(sql_query)
+
+        if match:
+            selected_columns = match.group(1).split(",")
+            for table, columns in schema.items():
+                for col in selected_columns:
+                    col_name = col.strip().lower()
+                    if col_name != "*" and col_name not in columns:
+                        self.log_security_incident(sql_query, f"Column '{col_name}' not found in table '{table}'.")
                         return False
+
         return True
 
     def log_security_incident(self, sql_query: str, reason: str):
@@ -122,7 +129,14 @@ class ValidationSecurityAgent(Agent):
             sql_query (str): The rejected SQL query.
             reason (str): The reason for rejection.
         """
+        security_event = {
+            "incident": "SQL Injection Attempt",
+            "reason": reason,
+            "query": sql_query
+        }
+
+        # ✅ Log incidents to a structured JSON file
         with open("logs/security.log", "a") as log_file:
-            log_file.write(f"\n🚨 SECURITY ALERT: {reason}\nQuery: {sql_query}\n---\n")
+            log_file.write(json.dumps(security_event, indent=4) + "\n")
 
         logger.warning(f"❌ Query rejected: {reason}")

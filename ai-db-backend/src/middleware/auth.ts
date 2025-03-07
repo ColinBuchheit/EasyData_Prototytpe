@@ -37,7 +37,7 @@ export const verifyToken = (req: AuthRequest, res: Response, next: NextFunction)
           logger.warn("⚠️ Token expired: Reauthentication required.");
           res.status(401).json({ message: "❌ Token expired, please log in again." });
         } else {
-          logger.error("❌ Unauthorized: Invalid token", err.message);
+          logger.error(`❌ Unauthorized: Invalid token - ${err.message}`);
           res.status(401).json({ message: "❌ Unauthorized: Invalid token" });
         }
         return;
@@ -48,7 +48,7 @@ export const verifyToken = (req: AuthRequest, res: Response, next: NextFunction)
       next();
     });
   } catch (error: unknown) {
-    logger.error("⚠️ Error verifying token:", (error as Error).message);
+    logger.error(`⚠️ Error verifying token: ${(error as Error).message}`);
     res.status(500).json({ message: "⚠️ Internal server error" });
   }
 };

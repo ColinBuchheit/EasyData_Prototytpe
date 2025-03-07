@@ -6,6 +6,9 @@ import logger from "../config/logger";
 
 const saltRounds = 10;
 
+/**
+ * ✅ Registers a new user securely.
+ */
 export const registerUser = async ({
   username,
   password,
@@ -16,15 +19,16 @@ export const registerUser = async ({
   role: string;
 }): Promise<User> => {
   try {
-    // ✅ Enforce minimum password length
-    if (password.length < 6) {
-      throw new Error("❌ Password must be at least 6 characters long.");
+    // ✅ Enforce strong password policies
+    const passwordPolicy = /^(?=.*\d)(?=.*[a-z])(?=.*[A-Z])(?=.*[\W_]).{8,}$/;
+    if (!passwordPolicy.test(password)) {
+      throw new Error("❌ Password must be at least 8 characters long, include one uppercase, one number, and one special character.");
     }
 
     logger.info(`🔍 Registering user: ${username}`);
 
-    // ✅ Ensure role is valid (Prevent unauthorized admin account creation)
-    if (role !== "user" && role !== "admin") {
+    // ✅ Ensure valid role assignment (Prevent unauthorized admin creation)
+    if (!["user", "admin"].includes(role)) {
       throw new Error("❌ Invalid role assignment.");
     }
 
@@ -56,10 +60,12 @@ export const registerUser = async ({
   }
 };
 
+/**
+ * ✅ Finds a user by their username.
+ */
 export const findUserByUsername = async (username: string): Promise<User | null> => {
   try {
     logger.info(`🔍 Searching for user: ${username}`);
-
     const result = await pool.query("SELECT id, username, role, password_hash FROM users WHERE username = $1", [username]);
 
     return result.rows[0] || null;
@@ -70,18 +76,52 @@ export const findUserByUsername = async (username: string): Promise<User | null>
   }
 };
 
-export const getUsers = async (): Promise<User[]> => {
+/**
+ * ✅ Stores the database type for a user securely.
+ */
+export const storeUserDatabaseType = async (userId: number, dbType: string): Promise<void> => {
   try {
-    logger.info("🔍 Fetching all users...");
-    const result = await pool.query("SELECT id, username, role FROM users");
-    return result.rows;
+    logger.info(`🔍 Storing database type for user ${userId}: ${dbType}`);
+
+    // ✅ Validate database type before storing
+    const validDbTypes = ["postgres", "mysql", "mssql", "sqlite", "mongo", "firebase", "couchdb", "dynamodb"];
+    if (!validDbTypes.includes(dbType)) {
+      throw new Error(`❌ Invalid database type: ${dbType}`);
+    }
+
+    await pool.query(
+      "INSERT INTO user_database_types (user_id, db_type) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET db_type = $2",
+      [userId, dbType]
+    );
+
+    logger.info(`✅ Database type stored for user ${userId}: ${dbType}`);
   } catch (error: unknown) {
     const err = error as Error;
-    logger.error(`❌ Error fetching users: ${err.message}`);
+    logger.error(`❌ Error storing database type: ${err.message}`);
     throw err;
   }
 };
 
+/**
+ * ✅ Retrieves all users with pagination.
+ */
+export async function getUsers(limit: number = 20, offset: number = 0) {
+  try {
+    const query = "SELECT id, username, role FROM users LIMIT $1 OFFSET $2";
+    const values = [limit, offset];
+
+    const result = await pool.query(query, values);
+    return result.rows;
+  } catch (error) {
+    const err = error as Error;
+    logger.error(`❌ Error fetching users: ${err.message}`);
+    throw new Error("Failed to fetch users.");
+  }
+}
+
+/**
+ * ✅ Retrieves a user by their ID.
+ */
 export const getUser = async (id: string): Promise<User | null> => {
   try {
     logger.info(`🔍 Fetching user by ID: ${id}`);
@@ -95,15 +135,18 @@ export const getUser = async (id: string): Promise<User | null> => {
   }
 };
 
-export const updateUserById = async (id: string, data: Partial<User>): Promise<User> => {
+/**
+ * ✅ Updates a user's profile (Only Admins can modify roles).
+ */
+export const updateUserById = async (id: string, data: Partial<User>, requesterRole: string): Promise<User> => {
   try {
     const { username, role } = data;
 
     logger.info(`🔍 Updating user ${id} with new data:`, data);
 
     // ✅ Ensure only admins can modify roles
-    if (role && role !== "user" && role !== "admin") {
-      throw new Error("❌ Invalid role assignment.");
+    if (role && requesterRole !== "admin") {
+      throw new Error("❌ Only admins can change user roles.");
     }
 
     const result = await pool.query(
@@ -120,11 +163,21 @@ export const updateUserById = async (id: string, data: Partial<User>): Promise<U
   }
 };
 
-export const deleteUserById = async (id: string): Promise<void> => {
+/**
+ * ✅ Deletes a user from the database.
+ */
+export const deleteUserById = async (id: string): Promise<boolean> => {
   try {
     logger.info(`🔍 Deleting user ID: ${id}`);
-    await pool.query("DELETE FROM users WHERE id = $1", [id]);
+
+    const result = await pool.query("DELETE FROM users WHERE id = $1 RETURNING *", [id]);
+
+    if (result.rowCount === 0) {
+      throw new Error(`❌ No user found with ID: ${id}`);
+    }
+
     logger.info(`✅ User ${id} deleted.`);
+    return true;
   } catch (error: unknown) {
     const err = error as Error;
     logger.error(`❌ Error deleting user: ${err.message}`);

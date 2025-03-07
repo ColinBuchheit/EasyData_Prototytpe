@@ -2,31 +2,28 @@
 import { Request, Response, NextFunction } from "express";
 import { AuthRequest } from "./auth";
 import { ConnectionManager } from "../services/connectionmanager";
-import { pool } from "../config/db";
 import logger from "../config/logger";
 
 /**
  * Middleware to enforce role-based access control (RBAC).
  */
 export const authorizeRoles = (roles: string[], allowAdminOverride = true) => {
-  return (req: AuthRequest, res: Response, next: NextFunction): void => {
+  return async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
     if (!req.user || !req.user.role) {
       logger.warn(`⚠️ Unauthorized request to ${req.originalUrl} - No valid user found.`);
       res.status(401).json({ message: "❌ Unauthorized: You must be logged in." });
       return;
     }
 
-    const userRole = req.user.role.toLowerCase(); // ✅ Ensure case-insensitive role matching
+    const { dbType } = req.body; // ✅ Get database type from request
+    const userRole = req.user.role.toLowerCase();
     const allowedRoles = roles.map((role) => role.toLowerCase());
 
-    // ✅ Restrict Admin Override for Certain Roles
-    if (allowAdminOverride && userRole === "admin" && !["super-admin"].includes(req.user.role)) {
-      logger.info(`✅ Admin override granted for User ${req.user.id} to ${req.originalUrl}`);
-      return next();
-    }
+    // ✅ Check role-based access per database type (SQL & NoSQL support)
+    const hasAccess = await ConnectionManager.checkRoleAccess(req.user.id, dbType, roles);
 
-    if (!allowedRoles.includes(userRole)) {
-      logger.warn(`🚫 Access Denied: User ${req.user.id} (${userRole}) attempted to access ${req.originalUrl}. Allowed: [${roles.join(", ")}]`);
+    if (!hasAccess && !(allowAdminOverride && userRole === "admin")) {
+      logger.warn(`🚫 Access Denied: User ${req.user.id} (${userRole}) attempted to access ${req.originalUrl}.`);
       res.status(403).json({ message: "❌ Forbidden: Insufficient permissions." });
       return;
     }
@@ -40,9 +37,18 @@ export const authorizeRoles = (roles: string[], allowAdminOverride = true) => {
  * Middleware to ensure user has an active database connection before executing queries.
  */
 export const enforceActiveDatabaseConnection = (req: AuthRequest, res: Response, next: NextFunction): void => {
-  const { dbType } = req.body;
+  const { dbType, dbName } = req.body;
 
-  if (!dbType || !ConnectionManager.isConnected(req.user.id, dbType)) {
+  if (!dbType || !dbName) {
+    logger.warn(`🚫 Query Execution Denied: Missing database type or name in request.`);
+    res.status(400).json({ message: "❌ Bad Request: Database type and name are required." });
+    return;
+  }
+
+  // ✅ Support for both SQL & NoSQL active connection checks
+  const isConnected = ConnectionManager.isConnected(req.user.id, dbType, dbName);
+
+  if (!isConnected) {
     logger.warn(`🚫 Query Execution Denied: User ${req.user.id} has no active ${dbType} connection.`);
     res.status(403).json({ message: "❌ Forbidden: No active database connection. Please connect first." });
     return;
@@ -57,7 +63,7 @@ export const enforceActiveDatabaseConnection = (req: AuthRequest, res: Response,
  */
 export const enforceDatabaseOwnership = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { id } = req.params;
+    const { id, dbType } = req.params;
     const userId = req.user.id;
     const userRole = req.user.role;
 
@@ -67,20 +73,19 @@ export const enforceDatabaseOwnership = async (req: AuthRequest, res: Response, 
       return next();
     }
 
-    // ✅ Use optimized query with EXISTS for better performance
-    const { rows } = await pool.query("SELECT EXISTS (SELECT 1 FROM user_databases WHERE id = $1 AND user_id = $2)", [id, userId]);
+    // ✅ Check database ownership across SQL & NoSQL databases
+    const isOwner = await ConnectionManager.checkOwnership(userId, id, dbType);
 
-    if (!rows[0].exists) {
+    if (!isOwner) {
       res.status(403).json({ message: "❌ Forbidden: You do not have permission to delete this database connection." });
       logger.warn(`🚫 Access Denied: User ${userId} tried to delete a database they do not own.`);
       return;
     }
 
-    logger.info(`✅ User ${userId} is allowed to delete their own database connection ${id}`);
+    logger.info(`✅ User ${userId} is allowed to delete their own ${dbType} database connection ${id}`);
     next();
   } catch (error) {
-    const err = error as Error;
-    logger.error(`❌ Error verifying database ownership: ${err.message}`);
-    res.status(500).json({ message: "❌ Failed to verify database ownership.", error: err.message });
+    logger.error(`❌ Error verifying database ownership: ${(error as Error).message}`);
+    res.status(500).json({ message: "❌ Failed to verify database ownership." });
   }
 };

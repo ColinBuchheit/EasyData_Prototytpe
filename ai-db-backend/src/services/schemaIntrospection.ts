@@ -2,91 +2,100 @@ import { Pool as PostgresPool } from "pg";
 import mysql from "mysql2/promise";
 import sql from "mssql";
 import { Database as SQLiteDatabase } from "sqlite";
+import { MongoClient } from "mongodb";
+import admin from "firebase-admin";
+import nano from "nano";
+import AWS from "aws-sdk";
 import logger from "../config/logger";
 
 /**
- * Fetches PostgreSQL schema metadata.
+ * ✅ Fetches MongoDB schema metadata.
  */
-export const getPostgresSchema = async (pool: PostgresPool) => {
+export const getMongoSchema = async (client: MongoClient) => {
   try {
-    if (!pool) throw new Error(`❌ No active PostgreSQL connection.`);
-    
-    const query = `SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_schema = 'public';`;
-    const { rows } = await pool.query(query);
-    
-    if (!rows.length) {
-      logger.warn("⚠️ PostgreSQL schema is empty.");
+    if (!client) throw new Error("❌ No active MongoDB connection.");
+
+    const db = client.db();
+    const collections = await db.listCollections().toArray();
+
+    if (!collections.length) {
+      logger.warn("⚠️ MongoDB schema is empty.");
       return {};
     }
 
-    const schema = rows.reduce((acc, row) => {
-      acc[row.table_name] = acc[row.table_name] || [];
-      acc[row.table_name].push({ column: row.column_name, type: row.data_type });
-      return acc;
-    }, {} as Record<string, { column: string; type: string }[]>);
-
-    logger.info("✅ PostgreSQL schema introspection completed.");
+    const schema = collections.map(coll => ({ collection: coll.name }));
+    logger.info("✅ MongoDB schema introspection completed.");
     return schema;
-  } catch (error: unknown) {
-    const err = error as Error;
-    logger.error(`❌ Error retrieving PostgreSQL schema: ${err.message}`);
+  } catch (error) {
+    logger.error(`❌ Error retrieving MongoDB schema: ${(error as Error).message}`);
     throw error;
   }
 };
 
 /**
- * Fetches MySQL schema metadata.
+ * ✅ Fetches Firebase Firestore schema metadata.
  */
-export const getMySQLSchema = async (connection: mysql.Connection) => {
+export const getFirebaseSchema = async () => {
   try {
-    if (!connection) throw new Error(`❌ No active MySQL connection.`);
+    if (!admin.apps.length) throw new Error("❌ Firebase Admin SDK not initialized.");
 
-    const [rows] = await connection.execute<any[]>(`SELECT TABLE_NAME AS table_name, COLUMN_NAME AS column_name, DATA_TYPE AS data_type FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE();`);
+    const firestore = admin.firestore();
+    const collections = await firestore.listCollections();
 
-    if (!rows.length) {
-      logger.warn("⚠️ MySQL schema is empty.");
+    if (!collections.length) {
+      logger.warn("⚠️ Firebase schema is empty.");
       return {};
     }
 
-    const schema = rows.reduce((acc, row) => {
-      acc[row.table_name] = acc[row.table_name] || [];
-      acc[row.table_name].push({ column: row.column_name, type: row.data_type });
-      return acc;
-    }, {} as Record<string, { column: string; type: string }[]>);
-
-    logger.info("✅ MySQL schema introspection completed.");
+    const schema = collections.map((coll: FirebaseFirestore.CollectionReference) => ({ collection: coll.id })); // ✅ Now typed
+    logger.info("✅ Firebase schema introspection completed.");
     return schema;
-  } catch (error: unknown) {
-    const err = error as Error;
-    logger.error(`❌ Error retrieving MySQL schema: ${err.message}`);
+  } catch (error) {
+    logger.error(`❌ Error retrieving Firebase schema: ${(error as Error).message}`);
     throw error;
   }
 };
 
 /**
- * Fetches SQLite schema metadata.
+ * ✅ Fetches CouchDB schema metadata.
  */
-export const getSQLiteSchema = async (db: SQLiteDatabase) => {
+export const getCouchDBSchema = async (couch: any) => {
   try {
-    if (!db) throw new Error(`❌ No active SQLite connection.`);
+    if (!couch) throw new Error("❌ No active CouchDB connection.");
 
-    const rows = await db.all(`PRAGMA table_info('your_table_name')`);
-    
-    if (!rows.length) {
-      logger.warn("⚠️ SQLite schema is empty.");
+    const databases = await couch.db.list();
+    if (!databases.length) {
+      logger.warn("⚠️ CouchDB schema is empty.");
       return {};
     }
 
-    const schema = rows.map(row => ({
-      column: row.name,
-      type: row.type,
-    }));
-
-    logger.info("✅ SQLite schema introspection completed.");
+    const schema = databases.map((db: string) => ({ database: db })); // ✅ Now explicitly typed
+    logger.info("✅ CouchDB schema introspection completed.");
     return schema;
-  } catch (error: unknown) {
-    const err = error as Error;
-    logger.error(`❌ Error retrieving SQLite schema: ${err.message}`);
+  } catch (error) {
+    logger.error(`❌ Error retrieving CouchDB schema: ${(error as Error).message}`);
+    throw error;
+  }
+};
+
+/**
+ * ✅ Fetches DynamoDB schema metadata.
+ */
+export const getDynamoDBSchema = async () => {
+  try {
+    const dynamoDB = new AWS.DynamoDB();
+    const tables = await dynamoDB.listTables().promise();
+
+    if (!tables.TableNames || !tables.TableNames.length) {
+      logger.warn("⚠️ DynamoDB schema is empty.");
+      return {};
+    }
+
+    const schema = tables.TableNames.map(table => ({ table }));
+    logger.info("✅ DynamoDB schema introspection completed.");
+    return schema;
+  } catch (error) {
+    logger.error(`❌ Error retrieving DynamoDB schema: ${(error as Error).message}`);
     throw error;
   }
 };

@@ -1,10 +1,7 @@
 // src/config/env.ts
-import dotenv from "dotenv";
 import path from "path";
 import { logger } from "./logger"; // ✅ Use centralized logger
 
-// ✅ Load environment variables from .env file
-dotenv.config({ path: path.resolve(process.cwd(), ".env") });
 
 // ✅ List required environment variables
 const REQUIRED_ENV_VARS = [
@@ -23,9 +20,11 @@ const REQUIRED_ENV_VARS = [
 // ✅ Validate required environment variables
 REQUIRED_ENV_VARS.forEach((envVar) => {
   if (!process.env[envVar]) {
-    logger.error(`❌ Missing required environment variable: ${envVar}`);
+    logger.error("❌ Missing critical environment variable. Application cannot start.");
     process.exit(1);
   }
+  
+  
 });
 
 // ✅ Export ENV variables with Defaults
