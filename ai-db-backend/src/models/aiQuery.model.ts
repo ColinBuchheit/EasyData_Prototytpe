@@ -7,4 +7,6 @@ export interface AIQuery {
   result?: object | null; // ✅ Explicitly allows null
   error_log?: string | null; // ✅ Explicitly allows null
   created_at: Date | string; // ✅ Allows Date or string for serialization
+  duration_ms?: number | null; // ✅ Tracks execution duration in milliseconds
+
 }

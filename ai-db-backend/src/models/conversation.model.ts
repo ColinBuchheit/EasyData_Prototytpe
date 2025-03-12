@@ -7,4 +7,6 @@ export interface Conversation {
   message: string;
   response?: string | null; // ✅ Allows cases where response is unavailable
   timestamp: Date | string; // ✅ Allows Date or string for serialization
+  status: "active" | "archived" | "resolved"; // ✅ Tracks conversation state
+
 }

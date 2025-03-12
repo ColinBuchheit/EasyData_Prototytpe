@@ -15,7 +15,12 @@ export const authorizeRoles = (roles: string[], allowAdminOverride = true) => {
       return;
     }
 
-    const { dbType } = req.body; // ✅ Get database type from request
+    if (!["admin", "user", "read-only"].includes(req.user.role.toLowerCase())) {
+      res.status(403).json({ message: "❌ Unauthorized: Invalid role." });
+      return;
+    }
+
+    const { dbType } = req.body;
     const userRole = req.user.role.toLowerCase();
     const allowedRoles = roles.map((role) => role.toLowerCase());
 
@@ -67,13 +72,11 @@ export const enforceDatabaseOwnership = async (req: AuthRequest, res: Response, 
     const userId = req.user.id;
     const userRole = req.user.role;
 
-    // ✅ Admins can delete any database connection
     if (userRole === "admin") {
       logger.info(`✅ Admin override: User ${userId} is deleting database connection ${id}`);
       return next();
     }
 
-    // ✅ Check database ownership across SQL & NoSQL databases
     const isOwner = await ConnectionManager.checkOwnership(userId, id, dbType);
 
     if (!isOwner) {
@@ -86,6 +89,6 @@ export const enforceDatabaseOwnership = async (req: AuthRequest, res: Response, 
     next();
   } catch (error) {
     logger.error(`❌ Error verifying database ownership: ${(error as Error).message}`);
-    res.status(500).json({ message: "❌ Failed to verify database ownership." });
+    res.status(500).json({ message: "❌ Internal Server Error: Unable to verify ownership." });
   }
 };

@@ -35,7 +35,10 @@ export const verifyToken = (req: AuthRequest, res: Response, next: NextFunction)
       if (err) {
         if (err instanceof TokenExpiredError) {
           logger.warn("⚠️ Token expired: Reauthentication required.");
-          res.status(401).json({ message: "❌ Token expired, please log in again." });
+          res.status(401).json({ 
+            message: "❌ Token expired, please log in again.",
+            tokenExpired: true // ✅ Allows frontend to prompt for reauthentication
+          });
         } else {
           logger.error(`❌ Unauthorized: Invalid token - ${err.message}`);
           res.status(401).json({ message: "❌ Unauthorized: Invalid token" });
@@ -58,11 +61,16 @@ export const verifyToken = (req: AuthRequest, res: Response, next: NextFunction)
  */
 export const requireRole = (roles: string[]) => {
   return (req: AuthRequest, res: Response, next: NextFunction): void => {
-    if (!req.user || !roles.includes(req.user.role)) {
-      logger.warn(`🚫 Access Denied: User ${req.user?.id || "unknown"} attempted restricted action`);
+    if (!req.user || !req.user.role) {
       res.status(403).json({ message: "❌ Forbidden: Insufficient permissions" });
       return;
     }
+    
+    if (!roles.includes(req.user.role)) {
+      res.status(403).json({ message: "❌ Unauthorized: Invalid role" });
+      return;
+    }
+
     logger.info(`✅ Role validation passed: User ${req.user.id} has role ${req.user.role}`);
     next();
   };
