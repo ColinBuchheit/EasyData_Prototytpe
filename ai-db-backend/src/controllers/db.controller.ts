@@ -13,8 +13,14 @@ export const connectDatabase = async (req: AuthRequest, res: Response): Promise<
     let { dbType, cloudProvider, credentials } = req.body;
     const userId = req.user.id;
 
-    if (!credentials) {
-      res.status(400).json({ message: "❌ Missing database credentials." });
+    if (!credentials || typeof credentials !== "object") {
+      res.status(400).json({ message: "❌ Invalid or missing database credentials." });
+      return;
+    }
+
+    // ✅ Validate dbType before proceeding
+    if (dbType && !["mongo", "firebase", "couchdb", "dynamodb", "sql"].includes(dbType)) {
+      res.status(400).json({ message: "❌ Invalid database type." });
       return;
     }
 
@@ -22,29 +28,25 @@ export const connectDatabase = async (req: AuthRequest, res: Response): Promise<
     if (!dbType) {
       logger.info("🔍 Auto-detecting database type...");
       dbType = await detectDatabaseType(credentials);
-      
       if (!dbType) {
         res.status(400).json({ message: "❌ Unable to detect database type. Please specify manually." });
         return;
       }
-      
       logger.info(`✅ Detected database type: ${dbType}`);
     }
 
-    // ✅ Fetch credentials for SQL, NoSQL (MongoDB, Firebase, CouchDB, DynamoDB)
     const finalCredentials = credentials || await fetchCloudCredentials(userId, dbType);
-
     if (!finalCredentials) {
       res.status(401).json({ message: "❌ Unauthorized: No credentials found." });
       return;
     }
 
-    if (ConnectionManager.isConnected(userId, dbType)) {
+    const isAlreadyConnected = ConnectionManager.isConnected(userId, dbType);
+    if (isAlreadyConnected) {
       res.status(400).json({ message: "❌ You are already connected to a database." });
       return;
     }
 
-    // ✅ Establish connection dynamically based on database type
     const connectionManager = new ConnectionManager(userId, dbType, finalCredentials);
     await connectionManager.connect(finalCredentials);
 
@@ -151,29 +153,23 @@ export const disconnectDatabase = async (req: AuthRequest, res: Response): Promi
  */
 const detectDatabaseType = async (credentials: any): Promise<string | null> => {
   try {
-    const { url, host, username } = credentials;
-
-    if (!url && !host) {
-      return null; // No valid API info found
+    if (!credentials || typeof credentials !== "object") {
+      return null;
     }
 
-    // ✅ MongoDB Detection (Check for connection string pattern)
+    const { url, host, username } = credentials;
+    if (!url && !host) {
+      return null;
+    }
+
     if (url?.includes("mongodb.net")) return "mongo";
-
-    // ✅ Firebase Detection (Check for Firebase URL format)
     if (url?.includes("firebaseio.com") || url?.includes("firestore.googleapis.com")) return "firebase";
-
-    // ✅ CouchDB Detection (Check for "_all_dbs" API support)
     if (url?.includes("couchdb") || url?.includes("_all_dbs")) return "couchdb";
-
-    // ✅ DynamoDB Detection (Check for AWS endpoints)
     if (url?.includes("dynamodb") || credentials?.aws_access_key_id) return "dynamodb";
-
-    // ✅ SQL Detection (Check for standard host formats)
     const sqlHosts = ["postgresql", "mysql", "mariadb", "sqlserver"];
     if (host && sqlHosts.some(db => host.includes(db))) return "sql";
 
-    return null; // Unknown database type
+    return null;
   } catch (error) {
     logger.error(`❌ Error detecting database type: ${(error as Error).message}`);
     return null;

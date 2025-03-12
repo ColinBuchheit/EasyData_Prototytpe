@@ -1,12 +1,11 @@
 // src/config/swagger.ts
 import swaggerJSDoc from "swagger-jsdoc";
 import { ENV } from "./env";
-import fs from "fs";
+import glob from "glob";
 
-// ✅ Ensure NODE_ENV is always defined
 const NODE_ENV = process.env.NODE_ENV || "development";
 
-// ✅ Dynamically configure API servers based on environment
+// ✅ Dynamically configure API servers based on environment variables
 const servers = [
   {
     url: `http://localhost:${ENV.PORT}`,
@@ -14,22 +13,14 @@ const servers = [
   },
 ];
 
-if (NODE_ENV === "staging") {
-  servers.push({
-    url: "https://staging-api.easydata.com",
-    description: "Staging Server",
-  });
-} else if (NODE_ENV === "production") {
-  servers.push({
-    url: "https://api.easydata.com",
-    description: "Production Server",
-  });
+if (NODE_ENV === "staging" && ENV.STAGING_API_URL) {
+  servers.push({ url: ENV.STAGING_API_URL, description: "Staging Server" });
+} else if (NODE_ENV === "production" && ENV.PROD_API_URL) {
+  servers.push({ url: ENV.PROD_API_URL, description: "Production Server" });
 }
 
-// ✅ Validate `apis` paths before using them
-const apiPaths = ["./src/routes/v1/*.ts", "./src/controllers/v1/*.ts"].filter((path) =>
-  fs.existsSync(path)
-);
+// ✅ Properly scan for API files using `glob.sync()`
+const apiPaths = glob.sync("./src/routes/v1/*.ts").concat(glob.sync("./src/controllers/v1/*.ts"));
 
 const options = {
   swaggerDefinition: {
@@ -49,16 +40,9 @@ const options = {
         },
       },
     },
-    security: [
-      {
-        bearerAuth: [], // 🔹 Required auth endpoints
-      },
-      {
-        bearerAuth: ["optional"], // 🔹 Allows optional authentication (for public routes)
-      },
-    ],
+    security: [{ bearerAuth: [] }], // ✅ Fixed security structure
   },
-  apis: apiPaths.length > 0 ? apiPaths : [], // ✅ Prevent Swagger from breaking on missing files
+  apis: apiPaths.length > 0 ? apiPaths : ["./src/routes/fallback.ts"], // ✅ Fallback route to prevent errors
 };
 
 const swaggerSpec = swaggerJSDoc(options);

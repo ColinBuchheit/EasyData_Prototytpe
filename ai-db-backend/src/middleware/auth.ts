@@ -1,6 +1,6 @@
 // src/middleware/auth.ts
 import { Request, Response, NextFunction } from "express";
-import jwt, { TokenExpiredError } from "jsonwebtoken";
+import jwt, { JwtPayload, TokenExpiredError } from "jsonwebtoken";
 import { ENV } from "../config/env";
 import logger from "../config/logger";
 
@@ -66,6 +66,15 @@ export const requireRole = (roles: string[]) => {
     logger.info(`✅ Role validation passed: User ${req.user.id} has role ${req.user.role}`);
     next();
   };
+};
+
+export const verifyWebSocketToken = (token: string): number | null => {
+  try {
+    const decoded = jwt.verify(token, ENV.JWT_SECRET) as JwtPayload;
+    return decoded?.id ? Number(decoded.id) : null;
+  } catch (err) {
+    return null;
+  }
 };
 
 /**

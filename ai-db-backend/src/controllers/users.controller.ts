@@ -7,6 +7,7 @@ import {
 } from "../services/user.service";
 import { AuthRequest } from "../middleware/auth";
 import logger from "../config/logger";
+import { activeConnections } from "../server"; // ✅ Now it will work
 
 /**
  * Retrieves all users (Admin-only) with pagination.
@@ -22,7 +23,6 @@ export const getAllUsers = async (req: AuthRequest, res: Response): Promise<void
     const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 20;
     const offset = req.query.offset ? parseInt(req.query.offset as string, 10) : 0;
 
-    // Call the updated `getUsers()` method
     const users = await getUsers(limit, offset);
     
     logger.info(`✅ Admin ${req.user.id} retrieved users with pagination (limit: ${limit}, offset: ${offset}).`);
@@ -32,7 +32,6 @@ export const getAllUsers = async (req: AuthRequest, res: Response): Promise<void
     res.status(500).json({ message: "Error fetching users", error: (error as Error).message });
   }
 };
-
 
 /**
  * Retrieves a specific user (Admins or self).
@@ -77,30 +76,42 @@ export const updateUser = async (req: AuthRequest, res: Response): Promise<void>
       res.status(400).json({ message: "❌ Invalid User ID." });
       return;
     }
+    
 
-    if (username && typeof username !== "string") {
-      res.status(400).json({ message: "❌ Invalid username format" });
+    if (req.user.role !== "admin" && String(req.user.id) !== userId) {
+      res.status(403).json({ message: "❌ You can only update your own profile" });
       return;
     }
 
-    if (email && !/^\S+@\S+\.\S+$/.test(email)) {
-      res.status(400).json({ message: "❌ Invalid email format" });
-      return;
-    }
+// ✅ Allow only these fields to be updated (Prevents SQL Injection)
+    const allowedFields = ["username", "email"];
+    const updateData = Object.keys(req.body)
+      .filter((key) => allowedFields.includes(key))
+      .reduce((obj, key) => {
+        obj[key] = req.body[key];
+        return obj;
+      }, {} as Record<string, string>);
 
-    if (role && req.user.role !== "super-admin") {
-      res.status(403).json({ message: "❌ Only super-admins can change roles" });
-      return;
-    }
+    const updatedUser = await updateUserById(userId, updateData, req.user.role);
 
-    await updateUserById(userId, req.body, req.user.role); // ✅ Now passing the requester’s role
     logger.info(`✅ User ${req.user.id} updated profile of User ${userId}.`);
-    res.json(updateUser);
+    res.json(updatedUser);
+
+    // ✅ Broadcast update to Redux clients via WebSocket
+    if (activeConnections.has(Number(userId))) {
+      activeConnections.get(Number(userId))?.send(JSON.stringify({
+        type: "user_update",
+        data: updatedUser
+      }));
+    }
   } catch (error: unknown) {
     logger.error("❌ Error updating user:", (error as Error).message);
     res.status(500).json({ message: "Error updating user", error: (error as Error).message });
   }
 };
+
+
+
 
 /**
  * Deletes a user (Admin-only). Admins cannot delete themselves.
@@ -113,6 +124,7 @@ export const deleteUser = async (req: AuthRequest, res: Response): Promise<void>
       res.status(400).json({ message: "❌ Invalid User ID." });
       return;
     }
+    
 
     if (req.user.role !== "admin") {
       res.status(403).json({ message: "❌ Only admins can delete users" });
@@ -124,7 +136,7 @@ export const deleteUser = async (req: AuthRequest, res: Response): Promise<void>
       return;
     }
 
-    const deletedUser = await deleteUserById(userId); // ✅ Now returns a boolean
+    const deletedUser = await deleteUserById(userId);
     if (!deletedUser) {
       res.status(404).json({ message: "❌ User not found or already deleted." });
       return;
@@ -132,6 +144,11 @@ export const deleteUser = async (req: AuthRequest, res: Response): Promise<void>
 
     logger.info(`✅ Admin ${req.user.id} deleted User ${userId}.`);
     res.json({ message: "✅ User deleted successfully" });
+
+    // ✅ Notify all clients that user was deleted
+    for (const [uid, ws] of activeConnections) {
+      ws.send(JSON.stringify({ type: "user_deleted", data: userId }));
+    }
   } catch (error: unknown) {
     logger.error("❌ Error deleting user:", (error as Error).message);
     res.status(500).json({ message: "Error deleting user", error: (error as Error).message });

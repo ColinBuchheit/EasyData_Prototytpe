@@ -3,6 +3,7 @@ import logger from "../config/logger";
 import { ENV } from "../config/env";
 import { pool } from "../config/db";
 import redisClient from "../config/redis"; // ✅ Import Redis Client
+import { activeConnections } from "../server";
 
 const MAX_RETRIES = 3;
 const BACKOFF_DELAY = 2000; // 2 seconds
@@ -78,55 +79,99 @@ export async function fetchDatabaseSchema(userId: number, dbType: string, forceR
  * ✅ Generates an AI-powered SQL query with schema validation.
  */
 export async function generateSQLQuery(userQuery: string, dbType: string, schema: any): Promise<string> {
-  try {
-    logger.info(`🔍 Sending query generation request to AI-Agent Network for DB: ${dbType}`);
-    const response = await axios.post(
-      `${ENV.AI_AGENT_API}/generate-sql-query`,
-      { userQuery, dbType, schema },
-      {
-        headers: {
-          "Content-Type": "application/json",
-          "api_key": ENV.AI_API_KEY,
-          "request_secret": ENV.BACKEND_SECRET,
-          "origin": "backend-service"
-        },
+  let attempt = 0;
+  let lastError: any = null;
+
+  while (attempt < MAX_RETRIES) {
+    try {
+      logger.info(`🔍 [Attempt ${attempt + 1}] Sending query request to AI-Agent Network for DB: ${dbType}`);
+      const response = await axios.post(
+        `${ENV.AI_AGENT_API}/generate-sql-query`,
+        { userQuery, dbType, schema },
+        {
+          headers: {
+            "Content-Type": "application/json",
+            "api_key": ENV.AI_API_KEY,
+            "request_secret": ENV.BACKEND_SECRET,
+            "origin": "backend-service"
+          },
+        }
+      );
+
+      if (!response.data || !response.data.sqlQuery) {
+        throw new Error("AI failed to generate a valid SQL query.");
       }
-    );
 
-    if (!response.data || !response.data.sqlQuery) {
-      throw new Error("AI failed to generate a valid SQL query.");
+      const sqlQuery = response.data.sqlQuery.trim();
+      logger.info(`✅ AI-Generated SQL Query: ${sqlQuery}`);
+
+      // ✅ Enforce SELECT-only queries
+      if (!sqlQuery.toUpperCase().startsWith("SELECT")) {
+        throw new Error("❌ AI generated a non-SELECT query, which is not allowed.");
+      }
+
+      return sqlQuery;
+    } catch (error) {
+      lastError = error;
+      logger.error(`❌ AI failed to generate SQL query: ${error}`);
+      attempt++;
     }
-
-    logger.info(`✅ AI-Generated SQL Query: ${response.data.sqlQuery}`);
-    return response.data.sqlQuery;
-  } catch (error) {
-    logger.error(`❌ AI failed to generate SQL query: ${error}`);
-    throw new Error("AI-Agent Network failed to generate a valid SQL query.");
   }
+
+  throw new Error(`AI-Agent Network failed after ${MAX_RETRIES} attempts: ${lastError.message}`);
 }
 
 /**
  * ✅ Generates NoSQL queries with schema validation.
  */
-export async function generateNoSQLQuery(userQuery: string, dbType: string, schema: any[]): Promise<any> {
-  logger.info(`🔍 Generating NoSQL query for database type: ${dbType}`);
+export async function generateNoSQLQuery(userQuery: string, dbType: string, schema: any[], userId?: number): Promise<any> {
+  let attempt = 0;
+  let lastError: any = null;
+
+  logger.info(`🔍 Generating NoSQL query for database type: ${dbType} (User: ${userId})`);
 
   if (!schema || schema.length === 0 || !schema[0].collection) {
     throw new Error("❌ Schema data is missing or invalid for NoSQL query generation.");
   }
 
-  switch (dbType) {
-    case "mongo":
-      return { collection: schema[0].collection, filter: {} };
-    case "firebase":
-      return { collection: schema[0].collection, where: [] };
-    case "couchdb":
-      return { database: schema[0].database, view: "_all_docs", params: {} };
-    case "dynamodb":
-      return { table: schema[0].table, params: {} };
-    default:
-      throw new Error(`❌ NoSQL query generation not supported for ${dbType}`);
+  while (attempt < MAX_RETRIES) {
+    try {
+      const response = await axios.post(
+        `${ENV.AI_AGENT_API}/generate-nosql-query`,
+        { userQuery, dbType, schema },
+        {
+          headers: {
+            "Content-Type": "application/json",
+            "api_key": ENV.AI_API_KEY,
+            "request_secret": ENV.BACKEND_SECRET,
+            "origin": "backend-service"
+          },
+        }
+      );
+
+      if (!response.data || !response.data.nosqlQuery) {
+        throw new Error("❌ AI failed to generate a valid NoSQL query.");
+      }
+
+      const nosqlQuery = response.data.nosqlQuery;
+      logger.info(`✅ AI-Generated NoSQL Query: ${JSON.stringify(nosqlQuery)}`);
+
+      // ✅ WebSocket Streaming: Send AI query response in real time
+      if (userId && activeConnections.has(userId)) {
+        activeConnections.get(userId)?.send(
+          JSON.stringify({ type: "nosql_query_generated", data: nosqlQuery })
+        );
+      }
+
+      return nosqlQuery;
+    } catch (error) {
+      lastError = error;
+      logger.error(`❌ NoSQL query generation failed (Attempt ${attempt + 1}): ${error}`);
+      attempt++;
+    }
   }
+
+  throw new Error(`AI-Agent Network failed after ${MAX_RETRIES} attempts: ${lastError.message}`);
 }
 
 /**
@@ -180,6 +225,17 @@ export async function listActiveAISessions(): Promise<any[]> {
     return [];
   }
 }
+
+export async function checkAIServiceHealth(): Promise<boolean> {
+  try {
+    // Example API health check
+    const response = await fetch(`${process.env.AI_AGENT_API}/health`);
+    return response.ok;
+  } catch (error) {
+    return false;
+  }
+}
+
 
 /**
  * ✅ Refreshes schema when a user connects to a new database session.

@@ -209,7 +209,40 @@ public static getInstance(userId: number, dbType: string): ConnectionManager {
     }
   }
   
+  public static async processQuery(userId: number, queryText: string): Promise<any> {
+    const connection = activeConnections.get(userId);
+    if (!connection) {
+      throw new Error(`❌ No active connection for User ${userId}`);
+    }
+  
+    logger.info(`🔍 Processing query for User ${userId}: ${queryText}`);
+  
+    try {
+      // Simulating AI query execution (Replace with real logic)
+      return { userId, query: queryText, status: "processed" };
+    } catch (error) {
+      logger.error(`❌ Query Execution Failed: ${(error as Error).message}`);
+      throw error;
+    }
+  }
 
+  public static async getSchema(userId: number, dbType: string): Promise<any> {
+    const connection = activeConnections.get(userId);
+    if (!connection) {
+      throw new Error(`❌ No active connection for User ${userId} (${dbType})`);
+    }
+  
+    logger.info(`📊 Fetching schema for User ${userId} on ${dbType}`);
+  
+    try {
+      return await fetchDatabaseSchema(userId, dbType);
+    } catch (error) {
+      logger.error(`❌ Failed to retrieve schema: ${(error as Error).message}`);
+      throw error;
+    }
+  }
+  
+  
   /**
    * ✅ List active database connections.
    */
@@ -221,3 +254,5 @@ public static getInstance(userId: number, dbType: string): ConnectionManager {
     }));
   }
 }
+
+

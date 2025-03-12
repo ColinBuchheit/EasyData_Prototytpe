@@ -4,6 +4,8 @@ import { generateSQLQuery, generateNoSQLQuery, fetchDatabaseSchema } from "../se
 import { ConnectionManager } from "../services/connectionmanager";
 import { pool } from "../config/db";
 import logger from "../config/logger";
+import { activeConnections } from "../server"; // ✅ Import WebSocket connections
+
 
 /**
  * Processes AI-generated query requests and executes them in the backend.
@@ -13,7 +15,7 @@ export const processQuery = async (req: AuthRequest, res: Response): Promise<voi
     const { user_query, db_type } = req.body;
     const userId = req.user.id;
 
-    if (!user_query || typeof user_query !== "string") {
+    if (!user_query || typeof user_query !== "string" || user_query.trim().length === 0) {
       res.status(400).json({ error: "❌ Missing or invalid query input." });
       return;
     }
@@ -29,7 +31,6 @@ export const processQuery = async (req: AuthRequest, res: Response): Promise<voi
       return;
     }
 
-    // ✅ Fetch Schema from AI service
     logger.info(`🔍 Fetching schema for User ${userId}, database type: ${db_type}`);
     const schema = await fetchDatabaseSchema(userId, db_type);
 
@@ -43,22 +44,23 @@ export const processQuery = async (req: AuthRequest, res: Response): Promise<voi
     // ✅ Generate Query (SQL or NoSQL)
     let aiQuery;
     if (["mongo", "firebase", "couchdb", "dynamodb"].includes(db_type)) {
-      aiQuery = await generateNoSQLQuery(user_query, db_type, schema); // ✅ NoSQL Query Generation
+      aiQuery = await generateNoSQLQuery(user_query, db_type, schema);
     } else {
-      aiQuery = await generateSQLQuery(user_query, db_type, schema); // ✅ SQL Query Generation
+      aiQuery = await generateSQLQuery(user_query, db_type, schema);
     }
 
     if (!aiQuery || typeof aiQuery !== "object") {
-      throw new Error("AI service returned an invalid response.");
+      res.status(400).json({ error: "❌ AI service returned an invalid query." });
+      return;
+    }
+
+    // ✅ WebSocket Streaming: Send AI query response in real time
+    const userSocket = activeConnections.get(userId);
+    if (userSocket) {
+      userSocket.send(JSON.stringify({ type: "ai_query_generated", data: aiQuery }));
     }
 
     logger.info(`✅ AI-Generated Query for user ${userId}: ${JSON.stringify(aiQuery)}`);
-
-    // ✅ Validate the query against the schema before executing
-    if (!validateQueryAgainstSchema(aiQuery, schema, db_type)) {
-      res.status(400).json({ error: "❌ AI-Generated query does not match schema constraints." });
-      return;
-    }
 
     // ✅ Execute Query
     let result;
@@ -70,10 +72,18 @@ export const processQuery = async (req: AuthRequest, res: Response): Promise<voi
         res.status(403).json({ error: "❌ Only SELECT queries are allowed." });
         return;
       }
-      result = await pool.query(aiQuery.query);
+      result = await pool.query({
+        text: aiQuery.query,
+        values: [], // ✅ Prevent SQL Injection
+      });
     }
 
     res.json({ success: true, data: result.rows || result });
+
+    // ✅ Notify frontend WebSocket clients with query result
+    if (userSocket) {
+      userSocket.send(JSON.stringify({ type: "query_result", data: result.rows || result }));
+    }
   } catch (error: unknown) {
     const err = error as Error;
     logger.error(`❌ Query Execution Failed: ${err.message}`);

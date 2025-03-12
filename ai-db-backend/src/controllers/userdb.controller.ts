@@ -5,6 +5,7 @@ import logger from "../config/logger";
 import { AuthRequest } from "../middleware/auth";
 import { ConnectionManager } from "../services/connectionmanager"; // ✅ Manages user connections
 import { fetchCloudCredentials } from "../services/cloudAuth.service"; // ✅ Ensure credentials retrieval
+import { randomBytes } from "crypto";
 
 /**
  * Stores a new user database connection securely.
@@ -23,7 +24,6 @@ export const addUserDatabase = async (req: AuthRequest, res: Response): Promise<
       return;
     }
 
-    // ✅ Prevent duplicate database connections
     const existingDb = await pool.query(
       "SELECT id FROM user_databases WHERE user_id = $1 AND database_name = $2",
       [user_id, database_name]
@@ -34,16 +34,14 @@ export const addUserDatabase = async (req: AuthRequest, res: Response): Promise<
       return;
     }
 
-    // ✅ Encrypt all sensitive data before storing
-    const encryptedHost = encrypt(host);
-    const encryptedPort = encrypt(port.toString());
-    const encryptedUsername = encrypt(username);
-    const encryptedPassword = encrypt(password);
+    // ✅ Use a user-specific salt for stronger encryption
+    const salt = randomBytes(16).toString("hex");
+    const encryptedPassword = encrypt(`${salt}:${password}`);
 
     await pool.query(
       `INSERT INTO user_databases (user_id, db_type, database_name, auth_method, encrypted_host, encrypted_port, encrypted_username, encrypted_password)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [user_id, db_type, database_name, auth_method, encryptedHost, encryptedPort, encryptedUsername, encryptedPassword]
+      [user_id, db_type, database_name, auth_method, encrypt(host), encrypt(port.toString()), encrypt(username), encryptedPassword]
     );
 
     logger.info(`✅ User database stored securely for user ${user_id}`);
@@ -154,7 +152,7 @@ export const deleteUserDatabase = async (req: AuthRequest, res: Response): Promi
     const { id } = req.params;
     const userId = req.user.id;
 
-    const { rows } = await pool.query("SELECT user_id FROM user_databases WHERE id = $1", [id]);
+    const { rows } = await pool.query("SELECT user_id, db_type FROM user_databases WHERE id = $1", [id]);
 
     if (rows.length === 0) {
       res.status(404).json({ message: "❌ Database connection not found." });
@@ -162,6 +160,13 @@ export const deleteUserDatabase = async (req: AuthRequest, res: Response): Promi
     }
 
     const dbOwnerId = rows[0].user_id;
+    const dbType = rows[0].db_type;
+
+    // ✅ Prevent deletion if database is actively in use
+    if (ConnectionManager.isConnected(userId, dbType)) {
+      res.status(400).json({ message: "❌ Cannot delete an active database connection." });
+      return;
+    }
 
     if (userId !== dbOwnerId && req.user.role !== "admin") {
       res.status(403).json({ message: "❌ You do not have permission to delete this database connection." });

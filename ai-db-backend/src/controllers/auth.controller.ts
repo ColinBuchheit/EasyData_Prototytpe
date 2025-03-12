@@ -11,6 +11,7 @@ import crypto from "crypto";
  * Safely compares two values to prevent timing attacks.
  */
 const safeCompare = (a: string, b: string) => {
+  if (a.length !== b.length) return false;
   return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 };
 
@@ -38,13 +39,13 @@ export const register = async (req: Request, res: Response): Promise<void> => {
     logger.info(`🔍 Registering user: ${username}`);
 
     // Check if user exists in SQL or NoSQL
-    const existingUser = await findUserByUsername(username); // ✅ Ensure function is called correctly
+    const existingUser = await findUserByUsername(username);
     if (existingUser) {
       res.status(400).json({ message: `❌ User already exists in ${dbType || "SQL"} database.` });
       return;
     }
 
-    // ✅ Create the user (Hashing occurs inside `registerUser`)
+    // ✅ Create the user
     const newUser = await registerUser({ username, password, role });
 
     // ✅ Store dbType separately (if applicable)
@@ -67,7 +68,6 @@ export const login = async (req: Request, res: Response): Promise<void> => {
   try {
     const { username, password, dbType } = req.body;
 
-    // ✅ Validate input
     if (!username || typeof username !== "string") {
       res.status(400).json({ message: "❌ Invalid username format." });
       return;
@@ -77,23 +77,25 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    // ✅ Find user in SQL or NoSQL database
     const user = await findUserByUsername(username);
     if (!user) {
       res.status(401).json({ message: "❌ Invalid credentials" });
       return;
     }
 
-    // ✅ Validate password securely (handle missing salt case)
+    // ✅ Validate password securely
     const passwordValid = await bcrypt.compare(password, user.password_hash);
-
-
     if (!passwordValid) {
       logger.warn(`❌ Failed login attempt for user: ${username}`);
       res.status(401).json({ message: "❌ Invalid credentials" });
       return;
     }
-    
+
+    // ✅ Ensure role is valid before issuing a token
+    if (!["admin", "user"].includes(user.role)) {
+      res.status(403).json({ message: "❌ Unauthorized role" });
+      return;
+    }
 
     // ✅ Generate JWT token securely
     const token = jwt.sign(
