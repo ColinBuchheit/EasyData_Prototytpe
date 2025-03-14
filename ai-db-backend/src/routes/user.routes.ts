@@ -1,79 +1,44 @@
-// src/routes/user.routes.ts
 import { Router } from "express";
-import { getAllUsers, getUserById, updateUser, deleteUser } from "../controllers/users.controller";
-import { verifyToken, AuthRequest } from "../middleware/auth"; 
-import { authorizeRoles } from "../middleware/rbac";
-import rateLimit from "express-rate-limit";
-import logger from "../config/logger";
+import { verifyToken, requireRole } from "../middleware/auth";
+import {
+  getAllUsers,
+  getUserProfile,
+  getUserByIdController,
+  updateUser,
+  updateUserPassword,
+  deleteUser
+} from "../controllers/user.controller";
 
 const router = Router();
 
-// ✅ Rate limiter for fetching user data
-const userLimiter = rateLimit({
-  windowMs: 10 * 60 * 1000,
-  max: 20,
-  message: { error: "Too many requests, please try again later." }
-});
-
-// ✅ Apply authentication to all user routes
-router.use(verifyToken);
+/**
+ * ✅ Fetch all users (Admin-only, paginated)
+ */
+router.get("/", verifyToken, requireRole(["admin"]), getAllUsers);
 
 /**
- * @swagger
- * tags:
- *   name: Users
- *   description: User management endpoints
+ * ✅ Fetch logged-in user's profile
  */
+router.get("/profile", verifyToken, getUserProfile);
 
-// ✅ GET all users (Admin-only)
-router.get("/", authorizeRoles(["admin"]), userLimiter, async (req: AuthRequest, res) => {
-  logger.info(`✅ Admin ${req.user.id} accessed all users.`);
-  await getAllUsers(req, res);
-});
+/**
+ * ✅ Fetch a specific user's details (Admin or Self)
+ */
+router.get("/:id", verifyToken, getUserByIdController);
 
-// ✅ GET specific user (Admins or self)
-router.get("/:id", userLimiter, async (req: AuthRequest, res) => {
-  const userId = req.params.id;
+/**
+ * ✅ Update user details (Self or Admin)
+ */
+router.put("/:id", verifyToken, updateUser);
 
-  if (req.user.role !== "admin" && req.user.id !== Number(userId)) {
-    logger.warn(`🚫 Unauthorized access attempt by User ${req.user.id} to User ${userId}`);
-    res.status(403).json({ error: "You are not allowed to view this profile." });
-    return;
-  }
+/**
+ * ✅ Change password for logged-in user
+ */
+router.post("/change-password", verifyToken, updateUserPassword);
 
-  logger.info(`✅ User ${req.user.id} accessed profile of User ${userId}`);
-  await getUserById(req, res);
-});
-
-// ✅ UPDATE user profile (Self or Admin)
-router.put("/:id", async (req: AuthRequest, res) => {
-  const userId = req.params.id;
-  const { username, role } = req.body;
-
-  if (username && typeof username !== "string") {
-    res.status(400).json({ error: "Invalid username format." });
-    return;
-  }
-
-  if (role && !["user", "admin", "read-only"].includes(role)) {
-    res.status(400).json({ error: "Invalid role. Allowed roles: user, admin, read-only." });
-    return;
-  }
-
-  if (req.user.role !== "admin" && req.user.id !== Number(userId)) {
-    logger.warn(`🚫 Unauthorized update attempt by User ${req.user.id} on User ${userId}`);
-    res.status(403).json({ error: "You can only update your own profile." });
-    return;
-  }
-
-  logger.info(`✅ User ${req.user.id} updated profile of User ${userId}`);
-  await updateUser(req, res);
-});
-
-// ✅ DELETE user (Admin-only)
-router.delete("/:id", authorizeRoles(["admin"]), async (req: AuthRequest, res) => {
-  logger.warn(`⚠️ Admin ${req.user.id} deleted User ${req.params.id}`);
-  await deleteUser(req, res);
-});
+/**
+ * ✅ Delete a user (Admin only)
+ */
+router.delete("/:id", verifyToken, requireRole(["admin"]), deleteUser);
 
 export default router;

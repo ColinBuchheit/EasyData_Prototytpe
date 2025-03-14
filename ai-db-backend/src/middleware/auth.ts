@@ -24,7 +24,7 @@ export const verifyToken = (req: AuthRequest, res: Response, next: NextFunction)
     }
 
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      logger.warn("⚠️ Unauthorized access attempt: Invalid or missing token.");
+      logger.warn("⚠️ Unauthorized access attempt: Missing or malformed token.");
       res.status(401).json({ message: "❌ Unauthorized: No valid token provided." });
       return;
     }
@@ -34,20 +34,17 @@ export const verifyToken = (req: AuthRequest, res: Response, next: NextFunction)
     jwt.verify(token, ENV.JWT_SECRET, (err, decoded) => {
       if (err) {
         if (err instanceof TokenExpiredError) {
-          logger.warn("⚠️ Token expired: Reauthentication required.");
           res.status(401).json({ 
             message: "❌ Token expired, please log in again.",
-            tokenExpired: true // ✅ Allows frontend to prompt for reauthentication
+            tokenExpired: true // ✅ Allows frontend to detect expired tokens
           });
         } else {
-          logger.error(`❌ Unauthorized: Invalid token - ${err.message}`);
-          res.status(401).json({ message: "❌ Unauthorized: Invalid token" });
+          res.status(401).json({ message: "❌ Unauthorized: Invalid token." });
         }
         return;
       }
 
-      req.user = decoded;
-      logger.info(`✅ User ${req.user.id} successfully authenticated.`);
+      req.user = { id: (decoded as JwtPayload).userId, role: (decoded as JwtPayload).role };
       next();
     });
   } catch (error: unknown) {
@@ -56,17 +53,55 @@ export const verifyToken = (req: AuthRequest, res: Response, next: NextFunction)
   }
 };
 
+export function authorizeRoles(roles: string[], allowAdminOverride = true) {
+  return async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+    if (!req.user || !req.user.role) {
+      logger.warn(`⚠️ Unauthorized request to ${req.originalUrl} - No valid user found.`);
+      res.status(401).json({ message: "❌ Unauthorized: You must be logged in." });
+      return;
+    }
+
+    const userRole = req.user.role.toLowerCase();
+    const allowedRoles = roles.map((role) => role.toLowerCase());
+
+    // ✅ Check if user has the required role
+    if (!allowedRoles.includes(userRole)) {
+      if (allowAdminOverride && userRole === "admin") {
+        logger.info(`✅ Admin override: User ${req.user.id} granted access to ${req.originalUrl}`);
+      } else {
+        logger.warn(`🚫 Access Denied: User ${req.user.id} (Role: ${userRole}) attempted to access ${req.originalUrl}.`);
+        res.status(403).json({ message: "❌ Forbidden: Insufficient permissions." });
+        return;
+      }
+    }
+
+    logger.info(`✅ Access granted for User ${req.user.id} (${userRole}) to ${req.originalUrl}`);
+    next();
+  };
+}
+
 /**
  * Middleware to enforce role-based access (RBAC).
  */
-export const requireRole = (roles: string[]) => {
+export const requireRole = (roles: string[], allowAdminOverride = true) => {
   return (req: AuthRequest, res: Response, next: NextFunction): void => {
     if (!req.user || !req.user.role) {
       res.status(403).json({ message: "❌ Forbidden: Insufficient permissions" });
       return;
     }
-    
-    if (!roles.includes(req.user.role)) {
+
+    const userRole = req.user.role.toLowerCase();
+    const allowedRoles = roles.map((role) => role.toLowerCase());
+
+    // ✅ Admin Override (if allowed)
+    if (allowAdminOverride && userRole === "admin") {
+      logger.info(`✅ Admin override: User ${req.user.id} granted access to ${req.originalUrl}`);
+      next();
+      return;
+    }
+
+    // ✅ Validate user role
+    if (!allowedRoles.includes(userRole)) {
       res.status(403).json({ message: "❌ Unauthorized: Invalid role" });
       return;
     }
@@ -76,10 +111,11 @@ export const requireRole = (roles: string[]) => {
   };
 };
 
+
 export const verifyWebSocketToken = (token: string): number | null => {
   try {
     const decoded = jwt.verify(token, ENV.JWT_SECRET) as JwtPayload;
-    return decoded?.id ? Number(decoded.id) : null;
+    return decoded?.userId ? Number(decoded.userId) : null;
   } catch (err) {
     return null;
   }
@@ -95,14 +131,12 @@ export const verifyBackendRequest = (req: Request, res: Response, next: NextFunc
   }, {} as Record<string, string | string[] | undefined>);
 
   // ✅ Safe Handling of `request_secret`
-  let requestSecret: string;
+  let requestSecret: string = "";
 
   if (typeof normalizedHeaders["request_secret"] === "string") {
     requestSecret = normalizedHeaders["request_secret"];
   } else if (Array.isArray(normalizedHeaders["request_secret"])) {
-    requestSecret = normalizedHeaders["request_secret"][0]; // ✅ Extract first value from array
-  } else {
-    requestSecret = ""; // ✅ Default to empty string if undefined
+    requestSecret = normalizedHeaders["request_secret"][0];
   }
 
   if (requestSecret !== ENV.BACKEND_SECRET) {

@@ -7,6 +7,8 @@ import { ENV } from "./env";
 const { combine, timestamp, printf, colorize } = winston.format;
 
 const enableDBLogging = process.env.LOG_DB === "true";
+const LOG_LEVEL = process.env.LOG_LEVEL || "info";
+
 const pool = enableDBLogging
   ? new Pool({
       host: ENV.DB_HOST,
@@ -40,7 +42,7 @@ const combinedTransport = new DailyRotateFile({
 });
 
 const logger = winston.createLogger({
-  level: "info",
+  level: LOG_LEVEL,
   format: combine(colorize(), timestamp(), logFormat),
   transports: [
     new winston.transports.Console(),
@@ -49,6 +51,25 @@ const logger = winston.createLogger({
   ],
 });
 
+// ✅ Ensure Log Table Exists
+const ensureLogTable = async () => {
+  if (!enableDBLogging || !pool) return;
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS logs (
+        id SERIAL PRIMARY KEY,
+        level VARCHAR(10),
+        message TEXT,
+        timestamp TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    logger.info("✅ Logs table ensured.");
+  } catch (err) {
+    logger.error(`❌ Failed to ensure logs table: ${(err as Error).message}`);
+  }
+};
+
+// ✅ Batch Logging to Database
 const logBuffer: { level: string; message: string }[] = [];
 const BATCH_INTERVAL = 5000;
 const MAX_BATCH_SIZE = 10;
@@ -67,8 +88,8 @@ async function flushLogs() {
   const logsToInsert = [...logBuffer];
 
   try {
-    const query = "INSERT INTO logs (level, message, timestamp) VALUES ($1, $2, NOW())";
-    await Promise.all(logsToInsert.map(log => pool.query(query, [log.level, log.message])));
+    const values = logsToInsert.map(log => `('${log.level}', '${log.message.replace(/'/g, "''")}', NOW())`).join(", ");
+    await pool.query(`INSERT INTO logs (level, message, timestamp) VALUES ${values}`);
     logBuffer.length = 0; // ✅ Clear buffer only on success
   } catch (err) {
     logger.error(`❌ Failed to batch log messages: ${(err as Error).message}`);
@@ -82,10 +103,12 @@ logger.on("error", (error) => logToDatabase("error", error.message));
 process.on("exit", async () => {
   await flushLogs();
   if (pool) {
-    await pool.end(); // ✅ Close DB connection
+    await pool.end();
   }
   logger.info("✅ Logs flushed before exit.");
 });
+
+ensureLogTable();
 
 export { logger, logToDatabase };
 export default logger;

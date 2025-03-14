@@ -16,11 +16,13 @@
     "aws-sdk": "^2.1692.0",
     "axios": "^1.8.1",
     "bcrypt": "^5.1.1",
+    "compression": "^1.8.0",
     "cors": "^2.8.5",
     "crypto": "^1.0.1",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "express-rate-limit": "^7.5.0",
+    "express-ws": "^5.0.2",
     "firebase-admin": "^13.2.0",
     "helmet": "^8.0.0",
     "ioredis-mock": "^8.9.0",
@@ -32,7 +34,7 @@
     "nano": "^10.1.4",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
-    "pg": "^8.13.3",
+    "pg": "^8.14.0",
     "redis": "^4.7.0",
     "redis-server": "^1.2.2",
     "sqlite": "^5.1.1",
@@ -41,14 +43,15 @@
     "swagger-ui-express": "^5.0.1",
     "tedious": "^14.4.0",
     "winston": "^3.17.0",
-    "winston-daily-rotate-file": "^5.0.0",
-    "ws": "^8.18.1"
+    "winston-daily-rotate-file": "^5.0.0"
   },
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",
+    "@types/compression": "^1.7.5",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/express-rate-limit": "^6.0.2",
+    "@types/express-ws": "^3.0.5",
     "@types/glob": "^8.1.0",
     "@types/jsonwebtoken": "^9.0.9",
     "@types/morgan": "^1.9.9",
@@ -64,6 +67,7 @@
     "eslint": "^9.21.0",
     "prettier": "^3.5.2",
     "ts-node": "^10.9.2",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "ws": "^8.18.1"
   }
 }

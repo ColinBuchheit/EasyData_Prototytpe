@@ -1,107 +1,56 @@
 import http from "http";
-import app from "./app";
-import { ENV } from "./config/env";
-import { pool } from "./config/db";
-import logger from "./config/logger";
-import { ConnectionManager } from "./services/connectionmanager";
+import { Server as WebSocketServer } from "ws";
 import dotenv from "dotenv";
-import { WebSocketServer, WebSocket } from "ws";
-import jwt, { JwtPayload } from "jsonwebtoken";
+import logger from "./config/logger";
+import { pool } from "./config/db";
+import app from "./app";
 
+// ✅ Load environment variables
 dotenv.config();
 
-const PORT = ENV.PORT || 5000;
+// ✅ Create an HTTP server
 const server = http.createServer(app);
 
 // ✅ Initialize WebSocket Server
 const wss = new WebSocketServer({ server });
-export const activeConnections = new Map<number, WebSocket>(); // ✅ Now it can be imported!
 
-logger.info("✅ WebSocket Server initialized.");
-
-// ✅ WebSocket Authentication
-const authenticateWebSocket = (token: string): number | null => {
-  try {
-    const decoded = jwt.verify(token, ENV.JWT_SECRET) as JwtPayload;
-
-    if (typeof decoded === "object" && "id" in decoded) {
-      return decoded.id as number; // ✅ TypeScript now recognizes `id`
-    }
-
-    return null;
-  } catch (err) {
-    return null;
-  }
-};
-
-
-// ✅ WebSocket Event Handlers
-wss.on("connection", (ws: WebSocket, req) => {
-  const token = req.url?.split("?token=")[1];
-
-  if (!token) {
-    ws.send(JSON.stringify({ error: "❌ Unauthorized: Missing token" }));
-    ws.close();
-    return;
-  }
-
-  const userId = authenticateWebSocket(token);
-  if (!userId) {
-    ws.send(JSON.stringify({ error: "❌ Unauthorized: Invalid token" }));
-    ws.close();
-    return;
-  }
-
-  logger.info(`🔗 User ${userId} connected via WebSocket.`);
-  activeConnections.set(userId, ws);
+// ✅ WebSocket Connection Handling
+wss.on("connection", (ws, req) => {
+  logger.info("🔌 WebSocket Connected");
 
   ws.on("message", async (message) => {
-    logger.info(`📩 Message from User ${userId}: ${message}`);
-    
-    if (message.toString().startsWith("QUERY:")) {
-      // Handle query processing
-      const queryText = message.toString().replace("QUERY:", "").trim();
-      const aiResponse = await ConnectionManager.processQuery(userId, queryText);
-      ws.send(JSON.stringify({ type: "query_response", data: aiResponse }));
-    } else if (message.toString().startsWith("SCHEMA:")) {
-      // Handle schema retrieval
-      const dbType = message.toString().replace("SCHEMA:", "").trim();
-      const schemaData = await ConnectionManager.getSchema(userId, dbType);
-      ws.send(JSON.stringify({ type: "schema_response", data: schemaData }));
-    } else {
-      ws.send(JSON.stringify({ error: "❌ Unknown message type." }));
+    try {
+      const parsedMessage = JSON.parse(message.toString());
+      const { token, action, data } = parsedMessage;
+
+      if (!token) {
+        ws.send(JSON.stringify({ type: "error", message: "❌ Unauthorized WebSocket connection." }));
+        ws.close();
+        return;
+      }
+
+      ws.send(JSON.stringify({ type: "processing", message: "Processing your request..." }));
+    } catch (error) {
+      logger.error(`❌ WebSocket Error: ${(error as Error).message}`);
+      ws.send(JSON.stringify({ type: "error", message: "❌ WebSocket processing failed." }));
     }
   });
 
   ws.on("close", () => {
-    logger.info(`❌ User ${userId} disconnected.`);
-    activeConnections.delete(userId);
+    logger.info("🔌 WebSocket Disconnected");
   });
 });
 
-// ✅ Start the Server
-server.listen(PORT, () => {
-  logger.info(`🚀 Server running on port ${PORT}`);
+// ✅ Start Server & Database Connection
+const PORT = process.env.PORT || 5000;
+server.listen(PORT, async () => {
+  try {
+    await pool.connect();
+    logger.info(`🚀 Server running on port ${PORT}`);
+  } catch (error) {
+    logger.error(`❌ Database connection failed: ${(error as Error).message}`);
+    process.exit(1); // Exit if DB fails
+  }
 });
 
-// ✅ Graceful Shutdown Handling
-const gracefulShutdown = async () => {
-  logger.info("⚠️ Initiating graceful shutdown...");
-
-  // ✅ Close all active database connections
-  await ConnectionManager.closeAllConnections();
-  await pool.end();
-
-  logger.info("✅ Database connections closed.");
-
-  server.close(() => {
-    logger.info("✅ Server shutdown complete.");
-    process.exit(0);
-  });
-};
-
-
-
-// ✅ Handle process termination signals
-process.on("SIGINT", gracefulShutdown);
-process.on("SIGTERM", gracefulShutdown);
+export { server, wss };

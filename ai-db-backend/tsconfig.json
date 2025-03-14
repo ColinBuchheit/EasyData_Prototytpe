@@ -7,7 +7,10 @@
     "strict": true,
     "esModuleInterop": true,
     "resolveJsonModule": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "lib": ["ESNext"],  
+    "types": ["node", "ws"]  
   },
-  "include": ["src/types/**/*", "src/**/*"]
+  "include": ["src/**/*"],
+  "exclude": ["node_modules/@types/undici-types"]  // ✅ Correct placement
 }

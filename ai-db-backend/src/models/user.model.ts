@@ -1,14 +1,13 @@
-// src/models/user.model.ts
 export interface User {
   id: number;
   username: string;
-  email?: string | null; // ✅ Allows `null` for accounts without an email
+  email?: string | null;
   password_hash: string;
-  password_salt?: string; // ✅ Ensures salted password hashing
+  password_salt?: string;
   role: "admin" | "user" | "read-only";
-  is_active: boolean; // ✅ Tracks account status
-  created_at: Date | string; // ✅ Allows Date or string for serialization
-  updated_at?: Date | string; // ✅ Tracks last update
-  last_login?: Date | string; // ✅ Tracks last successful login
-
+  is_active: boolean;
+  two_factor_enabled?: boolean; // ✅ Tracks whether 2FA is enabled
+  created_at: Date | string;
+  updated_at?: Date | string;
+  last_login?: Date | string;
 }

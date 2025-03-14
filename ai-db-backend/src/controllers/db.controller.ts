@@ -1,178 +1,174 @@
 import { Request, Response } from "express";
-import { ConnectionManager } from "../services/connectionmanager";
-import { AuthRequest } from "../middleware/auth";
-import { pool } from "../config/db";
+import {
+  connectDatabase,
+  disconnectDatabase,
+  checkDatabaseHealth,
+  fetchTables,
+  fetchTableSchema,
+  runQuery,
+  createUser as createUserService,  // ✅ Prevents import conflicts
+  updateUserRole as updateUserRoleService,
+  deleteUser as deleteUserService,
+  createConversation as createConversationService,
+  getConversations as getConversationsService
+} from "../services/db.service";
+
 import logger from "../config/logger";
-import { fetchCloudCredentials } from "../services/cloudAuth.service";
+import { AuthRequest } from "../middleware/auth";
 
 /**
- * Connects the user to a database securely.
+ * ✅ Connect a user to the AppDB.
  */
-export const connectDatabase = async (req: AuthRequest, res: Response): Promise<void> => {
+export async function connectDB(req: AuthRequest, res: Response): Promise<void> {
   try {
-    let { dbType, cloudProvider, credentials } = req.body;
     const userId = req.user.id;
-
-    if (!credentials || typeof credentials !== "object") {
-      res.status(400).json({ message: "❌ Invalid or missing database credentials." });
-      return;
-    }
-
-    // ✅ Validate dbType before proceeding
-    if (dbType && !["mongo", "firebase", "couchdb", "dynamodb", "sql"].includes(dbType)) {
-      res.status(400).json({ message: "❌ Invalid database type." });
-      return;
-    }
-
-    // ✅ Auto-detect database type if not provided
-    if (!dbType) {
-      logger.info("🔍 Auto-detecting database type...");
-      dbType = await detectDatabaseType(credentials);
-      if (!dbType) {
-        res.status(400).json({ message: "❌ Unable to detect database type. Please specify manually." });
-        return;
-      }
-      logger.info(`✅ Detected database type: ${dbType}`);
-    }
-
-    const finalCredentials = credentials || await fetchCloudCredentials(userId, dbType);
-    if (!finalCredentials) {
-      res.status(401).json({ message: "❌ Unauthorized: No credentials found." });
-      return;
-    }
-
-    const isAlreadyConnected = ConnectionManager.isConnected(userId, dbType);
-    if (isAlreadyConnected) {
-      res.status(400).json({ message: "❌ You are already connected to a database." });
-      return;
-    }
-
-    const connectionManager = new ConnectionManager(userId, dbType, finalCredentials);
-    await connectionManager.connect(finalCredentials);
-
-    logger.info(`✅ User ${userId} connected to ${dbType}`);
-    res.json({ message: `✅ Successfully connected to ${dbType}` });
+    const response = await connectDatabase(userId);
+    res.json(response);
   } catch (error) {
     logger.error(`❌ Database connection failed: ${(error as Error).message}`);
-    res.status(500).json({ message: "Database connection failed" });
+    res.status(500).json({ message: "❌ Database connection failed.", error: (error as Error).message });
   }
-};
-
+}
 
 /**
- * Retrieves the database schema.
+ * ✅ Check if the database is online.
  */
-/**
- * Retrieves the database schema.
- */
-export const getDatabaseSchema = async (req: AuthRequest, res: Response): Promise<void> => {
+export async function checkDBHealth(req: Request, res: Response): Promise<void> {
   try {
-    const { dbType } = req.body;
+    const status = await checkDatabaseHealth(); // Calls service function
+    res.json({ success: true, status });
+  } catch (error) {
+    res.status(500).json({ message: "❌ Database health check failed.", error: (error as Error).message });
+  }
+}
+
+
+/**
+ * ✅ Disconnect a user from the AppDB.
+ */
+export async function disconnectDB(req: AuthRequest, res: Response): Promise<void> {
+  try {
     const userId = req.user.id;
+    const response = await disconnectDatabase(userId);
+    res.json(response);
+  } catch (error) {
+    logger.error(`❌ Failed to disconnect database: ${(error as Error).message}`);
+    res.status(500).json({ message: "❌ Database disconnection failed.", error: (error as Error).message });
+  }
+}
 
-    if (!dbType) {
-      res.status(400).json({ message: "❌ Missing database type." });
-      return;
-    }
+/**
+ * ✅ List all tables in the AppDB.
+ */
+export async function listTables(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const tables = await fetchTables();
+    res.json({ tables });
+  } catch (error) {
+    res.status(500).json({ message: "❌ Failed to retrieve tables.", error: (error as Error).message });
+  }
+}
 
-    if (!ConnectionManager.isConnected(userId, dbType)) {
-      res.status(400).json({ message: "❌ No active database connection." });
-      return;
-    }
-
-    logger.info(`📊 Fetching database schema for User ${userId}, DB: ${dbType}`);
-
-    let schema;
-    
-    switch (dbType) {
-      case "mongo":
-        schema = await ConnectionManager.getMongoSchema(userId);
-        break;
-      case "firebase":
-        schema = await ConnectionManager.getFirebaseSchema(userId);
-        break;
-      case "couchdb":
-        schema = await ConnectionManager.getCouchDBSchema(userId);
-        break;
-      case "dynamodb":
-        schema = await ConnectionManager.getDynamoDBSchema(userId);
-        break;
-      default:
-        // ✅ SQL schema retrieval via information_schema
-        const schemaQuery = `
-          SELECT table_name, column_name, data_type 
-          FROM information_schema.columns 
-          WHERE table_schema = $1
-        `;
-        const { rows } = await pool.query(schemaQuery, ["public"]);
-        schema = rows.map(row => ({
-          table: row.table_name,
-          column: row.column_name,
-          type: row.data_type
-        }));
-        break;
-    }
-
+/**
+ * ✅ Fetch the schema of a specific table.
+ */
+export async function getTableSchema(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const { table } = req.params;
+    const schema = await fetchTableSchema(table);
     res.json({ schema });
   } catch (error) {
-    logger.error(`❌ Failed to retrieve schema: ${(error as Error).message}`);
-    res.status(500).json({ message: "Failed to retrieve schema" });
+    res.status(500).json({ message: `❌ Failed to retrieve schema for table: ${req.params.table}`, error: (error as Error).message });
   }
-};
-
+}
 
 /**
- * Disconnects the user from the database.
+ * ✅ Execute a query on the AppDB.
  */
-export const disconnectDatabase = async (req: AuthRequest, res: Response): Promise<void> => {
+export async function executeQuery(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const userId = req.user.id;
-
-    const activeConnections = ConnectionManager.listActiveConnections();
-    const activeConnection = activeConnections.find(conn => conn.userId === userId);
-
-    if (!activeConnection) {
-      res.status(400).json({ message: "❌ No active database connection to disconnect." });
+    const { query } = req.body;
+    if (!query) {
+      res.status(400).json({ message: "❌ No query provided." });
       return;
     }
 
-    const { dbType } = activeConnection;
-    const connectionManager = new ConnectionManager(userId, dbType, {});
-    await connectionManager.disconnect();
-
-    logger.info(`✅ User ${userId} disconnected from ${dbType}.`);
-    res.json({ message: "✅ Database session closed." });
+    const result = await runQuery(query);
+    res.json({ success: true, result });
   } catch (error) {
-    logger.error(`❌ Database session disconnection failed: ${(error as Error).message}`);
-    res.status(500).json({ message: "Database session disconnection failed" });
+    res.status(500).json({ message: "❌ Query execution failed.", error: (error as Error).message });
   }
-};
+}
 
 /**
- * Detects database type based on provided credentials or API connection.
+ * ✅ Create a new user.
  */
-const detectDatabaseType = async (credentials: any): Promise<string | null> => {
+export async function handleCreateUser(req: AuthRequest, res: Response): Promise<void> {
   try {
-    if (!credentials || typeof credentials !== "object") {
-      return null;
-    }
-
-    const { url, host, username } = credentials;
-    if (!url && !host) {
-      return null;
-    }
-
-    if (url?.includes("mongodb.net")) return "mongo";
-    if (url?.includes("firebaseio.com") || url?.includes("firestore.googleapis.com")) return "firebase";
-    if (url?.includes("couchdb") || url?.includes("_all_dbs")) return "couchdb";
-    if (url?.includes("dynamodb") || credentials?.aws_access_key_id) return "dynamodb";
-    const sqlHosts = ["postgresql", "mysql", "mariadb", "sqlserver"];
-    if (host && sqlHosts.some(db => host.includes(db))) return "sql";
-
-    return null;
+    const { username, email, passwordHash, role } = req.body;
+    const user = await createUserService(username, email, passwordHash, role); // ✅ Matches service function
+    res.json({ success: true, user });
   } catch (error) {
-    logger.error(`❌ Error detecting database type: ${(error as Error).message}`);
-    return null;
+    res.status(500).json({ message: "❌ Failed to create user.", error: (error as Error).message });
   }
-};
+}
+
+/**
+ * ✅ Update a user's role.
+ */
+export async function handleUpdateUserRole(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const adminId = req.user.id;
+    const { id } = req.params;
+    const { newRole } = req.body;
+
+    const user = await updateUserRoleService(adminId, Number(id), newRole); // ✅ Matches correct argument count
+    res.json({ success: true, user });
+  } catch (error) {
+    res.status(500).json({ message: "❌ Failed to update user role.", error: (error as Error).message });
+  }
+}
+
+/**
+ * ✅ Delete a user.
+ */
+export async function handleDeleteUser(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const adminId = req.user.id;
+    const { id } = req.params;
+
+    const user = await deleteUserService(adminId, Number(id)); // ✅ Matches correct argument count
+    res.json({ success: true, user });
+  } catch (error) {
+    res.status(500).json({ message: "❌ Failed to delete user.", error: (error as Error).message });
+  }
+}
+
+/**
+ * ✅ Create a new conversation.
+ */
+export async function handleCreateConversation(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const { agentName, message, response } = req.body;
+    const userId = req.user.id;
+
+    const conversation = await createConversationService(userId, agentName, message, response); // ✅ Matches correct argument count
+    res.json({ success: true, conversation });
+  } catch (error) {
+    res.status(500).json({ message: "❌ Failed to create conversation.", error: (error as Error).message });
+  }
+}
+
+/**
+ * ✅ Fetch a user's conversation history.
+ */
+export async function handleGetConversations(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const userId = req.user.id;
+    const conversations = await getConversationsService(userId); // ✅ Matches correct argument count
+    res.json({ success: true, conversations });
+  } catch (error) {
+    res.status(500).json({ message: "❌ Failed to retrieve conversations.", error: (error as Error).message });
+  }
+}
 

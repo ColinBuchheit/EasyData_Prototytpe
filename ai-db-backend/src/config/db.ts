@@ -7,15 +7,24 @@ import RedisMock from "ioredis-mock"; // ✅ Mock Redis for local development
 
 const MAX_CONNECTIONS = Number(process.env.DB_MAX_CONNECTIONS) || 10; // ✅ Configurable
 
-// ✅ Start Redis (Use `ioredis-mock` in Dev, Real Redis in Prod/Docker)
-const redisClient =
-  ENV.NODE_ENV === "development"
-    ? new RedisMock() // ✅ Use mock Redis in dev
-    : createClient({ url: ENV.REDIS_URL || "redis://localhost:6379" });
+// ✅ Lazy Initialization for Redis
+let redisClient: any = null;
+const getRedisClient = () => {
+  if (!redisClient) {
+    redisClient =
+      ENV.NODE_ENV === "development"
+        ? new RedisMock() // ✅ Use mock Redis in dev
+        : createClient({ url: ENV.REDIS_URL || "redis://localhost:6379" });
 
-redisClient.on("error", (err) => {
-  logger.error(`❌ Redis error: ${err.message}`);
-});
+    redisClient.on("error", (err: Error) => {
+      logger.error(`❌ Redis error: ${err.message}`);
+    });
+
+    redisClient.connect();
+    logger.info("✅ Redis client initialized.");
+  }
+  return redisClient;
+};
 
 // ✅ Create PostgreSQL connection pool
 const pool = new Pool({
@@ -29,14 +38,16 @@ const pool = new Pool({
   connectionTimeoutMillis: 2000, // Wait 2 seconds before timing out
 });
 
+// ✅ Improved Connection Handling
 const connectWithRetry = async (attempts = 3, delay = 5000) => {
   for (let i = 0; i < attempts; i++) {
+    const client = await pool.connect();
     try {
-      await pool.query("SELECT 1");
+      await client.query("SELECT 1"); // Validates connection
       logger.info("✅ Database connected successfully.");
       return;
-    } catch (err: unknown) {  // ✅ Change Error to unknown
-      if (err instanceof Error) { // ✅ Ensure it's an Error object before accessing properties
+    } catch (err: unknown) {
+      if (err instanceof Error) {
         logger.error(`❌ Database connection failed (Attempt ${i + 1}/${attempts}): ${err.message}`);
       } else {
         logger.error("❌ Database connection failed due to an unknown error.");
@@ -49,31 +60,44 @@ const connectWithRetry = async (attempts = 3, delay = 5000) => {
         logger.error("❌ All retry attempts failed. Exiting...");
         process.exit(1);
       }
+    } finally {
+      client.release(); // ✅ Ensures cleanup of connection
     }
   }
 };
 
 connectWithRetry();
 
-// 🔹 Handle Unexpected Errors Gracefully
-pool.on("error", (err: Error) => {
-  logger.error(`❌ Unexpected database error: ${err.message}`);
-});
+// ✅ Execution Time Logging for Queries
+const query = async (text: string, params?: any[]) => {
+  const start = Date.now();
+  const result = await pool.query(text, params);
+  const duration = Date.now() - start;
 
+  if (duration > 500) { // Log slow queries (500ms threshold)
+    logger.warn(`🐢 Slow Query Detected: ${text} - Duration: ${duration}ms`);
+  }
+  return result;
+};
+
+// ✅ Periodic Health Check (Every 60 seconds)
 const checkDatabaseHealth = async () => {
   setInterval(async () => {
+    const client = await pool.connect();
     try {
-      await pool.query("SELECT 1");
+      await client.query("SELECT 1");
       logger.info("✅ Database is healthy.");
     } catch (err) {
       logger.error("⚠️ Database connection lost! Attempting to reconnect...");
       await connectWithRetry();
+    } finally {
+      client.release();
     }
-  }, 60000); // Check every 60 seconds
+  }, 60000);
 };
 checkDatabaseHealth();
 
-// 🔹 Close Pool on App Shutdown (Graceful Exit)
+// ✅ Graceful Shutdown Handling
 const closeDatabase = async () => {
   logger.info("⚠️ Closing database connection...");
   await pool.end();
@@ -82,9 +106,11 @@ const closeDatabase = async () => {
 };
 
 const closeRedis = async () => {
-  logger.info("⚠️ Closing Redis connection...");
-  await redisClient.quit();
-  logger.info("✅ Redis connection closed.");
+  if (redisClient) {
+    logger.info("⚠️ Closing Redis connection...");
+    await redisClient.quit();
+    logger.info("✅ Redis connection closed.");
+  }
 };
 
 process.on("SIGINT", async () => {
@@ -96,4 +122,4 @@ process.on("SIGTERM", async () => {
   await closeDatabase();
 });
 
-export { pool, redisClient };
+export { pool, getRedisClient, query };
