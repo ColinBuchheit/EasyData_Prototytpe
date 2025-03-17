@@ -1,133 +1,156 @@
-// src/services/user.service.ts
-import bcrypt from "bcrypt";
 import { pool } from "../config/db";
-import { User } from "../models/user.model";
+import bcrypt from "bcrypt";
 import logger from "../config/logger";
 
-const saltRounds = 10;
-
-export const registerUser = async ({
-  username,
-  password,
-  role,
-}: {
-  username: string;
-  password: string;
-  role: string;
-}): Promise<User> => {
+/**
+ * ✅ Fetch all users (Admin-only) with pagination.
+ */
+export const getUsers = async (limit: number, offset: number) => {
   try {
-    // ✅ Enforce minimum password length
-    if (password.length < 6) {
-      throw new Error("❌ Password must be at least 6 characters long.");
-    }
-
-    logger.info(`🔍 Registering user: ${username}`);
-
-    // ✅ Ensure role is valid (Prevent unauthorized admin account creation)
-    if (role !== "user" && role !== "admin") {
-      throw new Error("❌ Invalid role assignment.");
-    }
-
-    // ✅ Check if the username already exists
-    const existingUser = await findUserByUsername(username);
-    if (existingUser) {
-      throw new Error("❌ Username already taken.");
-    }
-
-    // ✅ Prevent double hashing
-    if (password.startsWith("$2b$10$")) {
-      throw new Error("❌ Password is already hashed! Ensure it's not being double-hashed.");
-    }
-
-    const password_hash = await bcrypt.hash(password.trim(), saltRounds);
-    logger.info("✅ Password hashed successfully.");
-
     const result = await pool.query(
-      "INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3) RETURNING id, username, role",
-      [username, password_hash, role]
+      "SELECT id, username, email, role, created_at FROM users ORDER BY created_at DESC LIMIT $1 OFFSET $2",
+      [limit, offset]
     );
-
-    logger.info(`✅ User ${username} registered successfully.`);
-    return result.rows[0];
-  } catch (error: unknown) {
-    const err = error as Error;
-    logger.error(`❌ Error registering user: ${err.message}`);
-    throw err;
-  }
-};
-
-export const findUserByUsername = async (username: string): Promise<User | null> => {
-  try {
-    logger.info(`🔍 Searching for user: ${username}`);
-
-    const result = await pool.query("SELECT id, username, role, password_hash FROM users WHERE username = $1", [username]);
-
-    return result.rows[0] || null;
-  } catch (error: unknown) {
-    const err = error as Error;
-    logger.error(`❌ Error finding user by username: ${err.message}`);
-    throw err;
-  }
-};
-
-export const getUsers = async (): Promise<User[]> => {
-  try {
-    logger.info("🔍 Fetching all users...");
-    const result = await pool.query("SELECT id, username, role FROM users");
     return result.rows;
-  } catch (error: unknown) {
-    const err = error as Error;
-    logger.error(`❌ Error fetching users: ${err.message}`);
-    throw err;
+  } catch (error) {
+    logger.error(`❌ Error fetching users: ${(error as Error).message}`);
+    throw new Error("Failed to fetch users.");
   }
 };
 
-export const getUser = async (id: string): Promise<User | null> => {
+/**
+ * ✅ Fetch a user by ID.
+ */
+export const getUserById = async (userId: number) => {
   try {
-    logger.info(`🔍 Fetching user by ID: ${id}`);
-    const result = await pool.query("SELECT id, username, role FROM users WHERE id = $1", [id]);
-
+    const result = await pool.query("SELECT id, username, email, role, created_at FROM users WHERE id = $1", [userId]);
     return result.rows[0] || null;
-  } catch (error: unknown) {
-    const err = error as Error;
-    logger.error(`❌ Error fetching user by ID: ${err.message}`);
-    throw err;
+  } catch (error) {
+    logger.error(`❌ Error fetching user ${userId}: ${(error as Error).message}`);
+    throw new Error("Failed to fetch user.");
   }
 };
 
-export const updateUserById = async (id: string, data: Partial<User>): Promise<User> => {
+/**
+ * ✅ Update user details (self or admin modifying another user).
+ */
+export const updateUserById = async (userId: number, data: Partial<{ username: string; email: string; role?: string }>, requesterRole: string) => {
   try {
-    const { username, role } = data;
+    const fields = [];
+    const values: any[] = [];
 
-    logger.info(`🔍 Updating user ${id} with new data:`, data);
-
-    // ✅ Ensure only admins can modify roles
-    if (role && role !== "user" && role !== "admin") {
-      throw new Error("❌ Invalid role assignment.");
+    if (data.username) {
+      fields.push("username = $"+(fields.length+1));
+      values.push(data.username);
     }
 
-    const result = await pool.query(
-      "UPDATE users SET username = COALESCE($1, username), role = COALESCE($2, role) WHERE id = $3 RETURNING id, username, role",
-      [username, role, id]
-    );
+    if (data.email) {
+      fields.push("email = $"+(fields.length+1));
+      values.push(data.email);
+    }
 
-    logger.info(`✅ User ${id} updated successfully.`);
-    return result.rows[0];
-  } catch (error: unknown) {
-    const err = error as Error;
-    logger.error(`❌ Error updating user: ${err.message}`);
-    throw err;
+    if (data.role && requesterRole === "admin") {
+      fields.push("role = $"+(fields.length+1));
+      values.push(data.role);
+    }
+
+    if (fields.length === 0) {
+      throw new Error("❌ No valid fields to update.");
+    }
+
+    values.push(userId);
+    const query = `UPDATE users SET ${fields.join(", ")} WHERE id = $${values.length} RETURNING id, username, email, role, created_at`;
+
+    const result = await pool.query(query, values);
+    return result.rows[0] || null;
+  } catch (error) {
+    logger.error(`❌ Error updating user ${userId}: ${(error as Error).message}`);
+    throw new Error("Failed to update user.");
   }
 };
 
-export const deleteUserById = async (id: string): Promise<void> => {
+export const findUserByUsername = async (username: string) => {
   try {
-    logger.info(`🔍 Deleting user ID: ${id}`);
-    await pool.query("DELETE FROM users WHERE id = $1", [id]);
-    logger.info(`✅ User ${id} deleted.`);
-  } catch (error: unknown) {
-    const err = error as Error;
-    logger.error(`❌ Error deleting user: ${err.message}`);
-    throw err;
+    const result = await pool.query("SELECT id, username, email, password_hash, role FROM users WHERE username = $1", [username]);
+    return result.rows.length ? result.rows[0] : null;
+  } catch (error) {
+    logger.error(`❌ Error finding user by username: ${(error as Error).message}`);
+    throw new Error("Failed to find user.");
+  }
+};
+
+/**
+ * ✅ Find a user by email.
+ */
+export const findUserByEmail = async (email: string) => {
+  try {
+    const result = await pool.query("SELECT id, username, email, password_hash, role FROM users WHERE email = $1", [email]);
+    return result.rows.length ? result.rows[0] : null;
+  } catch (error) {
+    logger.error(`❌ Error finding user by email: ${(error as Error).message}`);
+    throw new Error("Failed to find user.");
+  }
+};
+
+
+export const registerUser = async (username: string, email: string, password: string, role = "user") => {
+  try {
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const result = await pool.query(
+      "INSERT INTO users (username, email, password_hash, role) VALUES ($1, $2, $3, $4) RETURNING id, username, email, role, created_at",
+      [username, email, hashedPassword, role]
+    );
+
+    logger.info(`✅ New user registered: ${username} (${email})`);
+    return result.rows[0];
+  } catch (error) {
+    logger.error(`❌ Error registering user: ${(error as Error).message}`);
+    throw new Error("Failed to register user.");
+  }
+};
+
+
+/**
+ * ✅ Securely update a user's password.
+ */
+export const updateUserPasswordById = async (userId: number, email: string, currentPassword: string, newPassword: string) => {
+  try {
+    // ✅ Fetch current password hash
+    const result = await pool.query("SELECT password_hash FROM users WHERE id = $1 AND email = $2", [userId, email]);
+
+    if (!result.rows.length) {
+      logger.warn(`❌ No matching user found for ID: ${userId}, Email: ${email}`);
+      return false;
+    }
+
+    const validPassword = await bcrypt.compare(currentPassword, result.rows[0].password_hash);
+    if (!validPassword) {
+      logger.warn(`❌ Incorrect current password for user ${userId}`);
+      return false;
+    }
+
+    // ✅ Hash new password
+    const newPasswordHash = await bcrypt.hash(newPassword, 10);
+    await pool.query("UPDATE users SET password_hash = $1 WHERE id = $2", [newPasswordHash, userId]);
+
+    logger.info(`✅ Password updated successfully for User ${userId}`);
+    return true;
+  } catch (error) {
+    logger.error(`❌ Error updating password: ${(error as Error).message}`);
+    throw new Error("Failed to update password.");
+  }
+};
+
+/**
+ * ✅ Delete a user (Admin-only).
+ */
+export const deleteUserById = async (userId: number) => {
+  try {
+    await pool.query("DELETE FROM users WHERE id = $1", [userId]);
+    logger.info(`✅ User ${userId} deleted successfully.`);
+    return true;
+  } catch (error) {
+    logger.error(`❌ Error deleting user ${userId}: ${(error as Error).message}`);
+    throw new Error("Failed to delete user.");
   }
 };

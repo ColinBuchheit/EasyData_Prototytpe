@@ -1,91 +1,176 @@
-// src/controllers/auth.controller.ts
-import { Request, Response } from "express";
+import { NextFunction, Request, Response } from "express";
 import jwt from "jsonwebtoken";
-import { ENV } from "../config/env";
-import { registerUser, findUserByUsername } from "../services/user.service";
-import logger from "../config/logger";
 import bcrypt from "bcrypt";
-
+import { ENV } from "../config/env";
+import { registerUser, findUserByUsername, findUserByEmail, updateUserPasswordById } from "../services/user.service";
+import { AuthService } from "../services/auth.service";
+import logger from "../config/logger";
+import { AuthRequest } from "../middleware/auth";
+import { getRedisClient } from "../config/redis";
+import { pool } from "mssql";
 
 /**
- * Register a new user.
+ * ✅ Register a new user
  */
 export const register = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { username, password, role } = req.body;
+    let { username, email, password, role } = req.body;
+    role = role || "user"; 
 
-    // ✅ Validate input
-    if (!username || typeof username !== "string" || username.length < 3) {
-      res.status(400).json({ message: "❌ Invalid username format." });
-      return;
-    }
-    if (!password || typeof password !== "string" || password.length < 6) {
-      res.status(400).json({ message: "❌ Password must be at least 6 characters long." });
-      return;
-    }
-    if (!["admin", "user"].includes(role)) {
-      res.status(400).json({ message: "❌ Invalid role. Allowed: 'admin', 'user'." });
+    // ✅ Enforce strong password policy
+    const strongPasswordRegex = /^(?=.*[A-Z])(?=.*\d)[A-Za-z\d@$!%*?&]{8,}$/;
+    if (!strongPasswordRegex.test(password)) {
+      res.status(400).json({ message: "❌ Password must be at least 8 characters, include one uppercase letter, and one number." });
       return;
     }
 
-    logger.info(`🔍 Registering user: ${username}`);
-
-    // Check if user already exists
-    const existingUser = await findUserByUsername(username);
-    if (existingUser) {
-      logger.warn(`❌ User already exists: ${username}`);
-      res.status(400).json({ message: "❌ User already exists" });
+    // ✅ Check if user exists
+    if (await findUserByUsername(username) || await findUserByEmail(email)) {
+      res.status(400).json({ message: `❌ User already exists.` });
       return;
     }
 
-    // ✅ Pass raw password to `registerUser()` (Hashing happens inside `user.service.ts`)
-    const newUser = await registerUser({ username, password, role });
+    // ✅ Hash password before saving
+    const hashedPassword = await AuthService.hashPassword(password);
+    const newUser = await registerUser(username, email, hashedPassword, role);
 
-    logger.info(`✅ User registered successfully: ${newUser.username}`);
     res.status(201).json({ message: "✅ User registered successfully", user: newUser });
   } catch (error) {
-    logger.error("❌ Error registering user:", error);
+    logger.error(`❌ Error registering user: ${(error as Error).message}`);
     res.status(500).json({ message: "Error registering user" });
   }
 };
 
 /**
- * Authenticate a user and return a JWT token.
+ * ✅ Authenticate user & generate JWT token
  */
 export const login = async (req: Request, res: Response): Promise<void> => {
   try {
     const { username, password } = req.body;
 
-    // Validate input
-    if (!username || typeof username !== "string") {
-      res.status(400).json({ message: "❌ Invalid username format." });
-      return;
-    }
-    if (!password || typeof password !== "string") {
-      res.status(400).json({ message: "❌ Invalid password format." });
+    if (!username || !password) {
+      res.status(400).json({ message: "❌ Invalid username or password format." });
       return;
     }
 
-    // Find user by username
     const user = await findUserByUsername(username);
     if (!user) {
       res.status(401).json({ message: "❌ Invalid credentials" });
       return;
     }
 
-    // ✅ Validate password (Assuming password_hash is stored in `user`)
+    // ✅ Validate password securely
     const passwordValid = await bcrypt.compare(password, user.password_hash);
     if (!passwordValid) {
+      logger.warn(`❌ Failed login attempt for user: ${username}`);
       res.status(401).json({ message: "❌ Invalid credentials" });
       return;
     }
 
     // ✅ Generate JWT token securely
-    const token = jwt.sign({ id: user.id, role: user.role }, ENV.JWT_SECRET, { expiresIn: "1h" });
-
+    const token = AuthService.generateToken(user.id, user.role);
     res.json({ message: "✅ Login successful", token });
   } catch (error) {
-    logger.error("❌ Error logging in:", error);
+    logger.error(`❌ Error logging in: ${(error as Error).message}`);
     res.status(500).json({ message: "Error logging in" });
   }
 };
+
+/**
+ * ✅ Refresh JWT Token (if valid)
+ */
+export const refreshToken = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const oldToken = req.body.token;
+    if (!oldToken) {
+      res.status(400).json({ message: "❌ Missing refresh token." });
+      return;
+    }
+
+    const redisClient = await getRedisClient();
+    
+    // ❌ Prevent reuse of blacklisted tokens
+    if (await redisClient.get(`blacklist:${oldToken}`)) {
+      logger.warn("❌ Attempted to reuse a revoked token.");
+      res.status(403).json({ message: "❌ Token has been revoked. Please log in again." });
+      return;
+    }
+
+    const newToken = AuthService.refreshToken(oldToken);
+    if (!newToken) {
+      res.status(403).json({ message: "❌ Invalid or expired refresh token. Please log in again." });
+      return;
+    }
+
+    res.json({ message: "✅ Token refreshed", token: newToken });
+  } catch (error) {
+    logger.error(`❌ Error refreshing token: ${(error as Error).message}`);
+    res.status(500).json({ message: "Error refreshing token" });
+  }
+};
+
+/**
+ * ✅ Logout User (JWT-based logout using Redis blacklist)
+ */
+export const logout = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const redisClient = await getRedisClient();
+    const token = req.headers.authorization?.split(" ")[1];
+
+    if (token) {
+      const decoded = AuthService.verifyToken(token);
+      if ("error" in decoded) {
+        res.status(400).json({ message: "Invalid or expired token." });
+        return;
+      }
+
+      // ✅ Set blacklist expiration based on token expiration
+      const tokenExpiry = (jwt.decode(token) as any)?.exp || Math.floor(Date.now() / 1000) + 3600;
+      const ttl = tokenExpiry - Math.floor(Date.now() / 1000);
+
+      await redisClient.set(`blacklist:${token}`, "true", "EX", ttl);
+    }
+
+    res.json({ message: "✅ Logout successful" });
+  } catch (error) {
+    res.status(500).json({ message: "Error logging out" });
+  }
+};
+
+/**
+ * ✅ Reset Password
+ */
+export const resetPassword = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { email, newPassword } = req.body;
+
+    if (!email || !newPassword) {
+      res.status(400).json({ message: "❌ Email and new password are required." });
+      return;
+    }
+
+    // ✅ Ensure strong new password
+    const strongPasswordRegex = /^(?=.*[A-Z])(?=.*\d)[A-Za-z\d@$!%*?&]{8,}$/;
+    if (!strongPasswordRegex.test(newPassword)) {
+      res.status(400).json({ message: "❌ Password must be at least 8 characters, include one uppercase letter, and one number." });
+      return;
+    }
+
+    const user = await findUserByEmail(email);
+    if (!user) {
+      res.status(404).json({ message: "❌ User not found." });
+      return;
+    }
+
+    const hashedPassword = await AuthService.hashPassword(newPassword);
+    
+    // ✅ Corrected function call
+    await updateUserPasswordById(user, email, "", hashedPassword);
+
+    res.json({ message: "✅ Password successfully reset." });
+  } catch (error) {
+    logger.error(`❌ Error resetting password: ${(error as Error).message}`);
+    res.status(500).json({ message: "Error resetting password" });
+  }
+};
+

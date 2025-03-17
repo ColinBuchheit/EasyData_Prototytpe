@@ -1,62 +1,53 @@
-// src/routes/auth.routes.ts
-import { Router } from "express";
-import { login, register } from "../controllers/auth.controller";
 import rateLimit from "express-rate-limit";
-import logger from "../config/logger";
+import { 
+  login, 
+  register, 
+  refreshToken, 
+  logout, 
+  resetPassword
+} from "../controllers/auth.controller";  // ✅ Auth-related functions remain
+
+import { 
+  getUserProfile, 
+  updateUserPassword 
+} from "../controllers/user.controller";  // ✅ Moved user-related functions
+import { verifyToken } from "../middleware/auth";
+import { Router } from "express";
+
+
 
 const router = Router();
 
 /**
- * @swagger
- * tags:
- *   name: Auth
- *   description: Authentication endpoints
+ * ✅ Rate limiter for login to prevent brute-force attacks
  */
-
-// ✅ Rate limiter for login to prevent brute-force attacks
 const loginLimiter = rateLimit({
-  windowMs: Number(process.env.LOGIN_RATE_LIMIT_WINDOW) || 15 * 60 * 1000,
-  max: Number(process.env.LOGIN_RATE_LIMIT_MAX) || 5,
-  message: { error: "❌ Too many login attempts, please try again later." }
+  windowMs: 15 * 60 * 1000, 
+  max: 5,
+  keyGenerator: (req) => {
+    const ip = req.headers["x-forwarded-for"] || req.ip;
+    return typeof ip === "string" ? ip : (Array.isArray(ip) ? ip[0] : "unknown"); // ✅ Fixes TypeScript issue
+  },
+  handler: (req, res) => res.status(429).json({ error: "❌ Too many login attempts. Try again later." }),
 });
 
-// ✅ Rate limiter for `/register` to prevent spam
+/**
+ * ✅ Rate limiter for registration to prevent spam
+ */
 const registerLimiter = rateLimit({
-  windowMs: Number(process.env.REGISTER_RATE_LIMIT_WINDOW) || 15 * 60 * 1000,
-  max: Number(process.env.REGISTER_RATE_LIMIT_MAX) || 3,
-  message: { error: "❌ Too many registrations, please try again later." }
+  windowMs: 15 * 60 * 1000, 
+  max: 3,
+  message: { error: "❌ Too many registration attempts. Try again later." },
 });
 
 /**
- * @swagger
- * /api/auth/register:
- *   post:
- *     summary: Register a new user
- *     tags: [Auth]
+ * ✅ Auth Routes
  */
-router.post("/register", registerLimiter, async (req, res, next) => {
-  try {
-    await register(req, res);
-    logger.info(`✅ New user registered: ${req.body.username}`);
-  } catch (error) {
-    next(error);
-  }
-});
-
-/**
- * @swagger
- * /api/auth/login:
- *   post:
- *     summary: Login a user and retrieve a JWT token
- *     tags: [Auth]
- */
-router.post("/login", loginLimiter, async (req, res, next) => {
-  try {
-    await login(req, res);
-  } catch (error) {
-    logger.warn(`❌ Failed login attempt for ${req.body.username}`);
-    next(error);
-  }
-});
-
+router.post("/register", registerLimiter, register);
+router.post("/login", loginLimiter, login);
+router.post("/refresh-token", refreshToken);
+router.post("/logout", verifyToken, logout);
+router.get("/profile", verifyToken, getUserProfile);
+router.post("/change-password", verifyToken, updateUserPassword);
+router.post("/reset-password", resetPassword);
 export default router;

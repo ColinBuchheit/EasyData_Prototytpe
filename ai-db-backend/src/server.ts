@@ -1,33 +1,56 @@
 import http from "http";
-import app from "./app";
-import { ENV } from "./config/env";
-import { pool } from "./config/db"; // ✅ Fixes TS2613
+import { Server as WebSocketServer } from "ws";
+import dotenv from "dotenv";
 import logger from "./config/logger";
-import { ConnectionManager } from "./services/connectionmanager";
+import { pool } from "./config/db";
+import app from "./app";
 
-const PORT = ENV.PORT || 5000;
+// ✅ Load environment variables
+dotenv.config();
+
+// ✅ Create an HTTP server
 const server = http.createServer(app);
 
-server.listen(PORT, () => {
-  logger.info(`🚀 Server running on port ${PORT}`);
+// ✅ Initialize WebSocket Server
+const wss = new WebSocketServer({ server });
+
+// ✅ WebSocket Connection Handling
+wss.on("connection", (ws, req) => {
+  logger.info("🔌 WebSocket Connected");
+
+  ws.on("message", async (message) => {
+    try {
+      const parsedMessage = JSON.parse(message.toString());
+      const { token, action, data } = parsedMessage;
+
+      if (!token) {
+        ws.send(JSON.stringify({ type: "error", message: "❌ Unauthorized WebSocket connection." }));
+        ws.close();
+        return;
+      }
+
+      ws.send(JSON.stringify({ type: "processing", message: "Processing your request..." }));
+    } catch (error) {
+      logger.error(`❌ WebSocket Error: ${(error as Error).message}`);
+      ws.send(JSON.stringify({ type: "error", message: "❌ WebSocket processing failed." }));
+    }
+  });
+
+  ws.on("close", () => {
+    logger.info("🔌 WebSocket Disconnected");
+  });
 });
 
-// ✅ Graceful Shutdown Handling
-const gracefulShutdown = async () => {
-  logger.info("⚠️ Initiating graceful shutdown...");
+// ✅ Start Server & Database Connection
+const PORT = process.env.PORT || 5000;
+server.listen(PORT, async () => {
+  try {
+    await pool.connect();
+    logger.info(`🚀 Server running on port ${PORT}`);
+  } catch (error) {
+    logger.error(`❌ Database connection failed: ${(error as Error).message}`);
+    process.exit(1); // Exit if DB fails
+  }
+});
 
-  // ✅ Close all active database connections
-  await ConnectionManager.closeAllConnections(); // ✅ Fixed missing method
-  await pool.end();
-
-  logger.info("✅ Database connections closed.");
-
-  server.close(() => {
-    logger.info("✅ Server shutdown complete.");
-    process.exit(0);
-  });
-};
-
-// ✅ Handle process termination signals
-process.on("SIGINT", gracefulShutdown);
-process.on("SIGTERM", gracefulShutdown);
+export { server, wss };

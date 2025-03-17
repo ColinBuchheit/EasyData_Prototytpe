@@ -4,10 +4,10 @@ import { ConnectionManager } from "../connectionmanager";
 import { fetchDatabaseSchema } from "../ai.service";
 import { fetchCloudCredentials } from "../cloudAuth.service"; // ✅ Import secure credentials retrieval
 
-export const connectMSSQL = async (userId: number, dbType: string, cloudProvider: string) => {
+export const connectMSSQL = async (userId: number, dbType: string) => {
   try {
     // ✅ Fetch credentials securely before connecting
-    const credentials = await fetchCloudCredentials(userId, dbType, cloudProvider);
+    const credentials = await fetchCloudCredentials(userId, dbType);
     if (!credentials) {
       throw new Error("❌ Missing credentials for database connection.");
     }

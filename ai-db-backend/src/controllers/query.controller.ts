@@ -1,115 +1,111 @@
+import { Request, Response } from "express";
+import { processAIQuery, processUserQuery, executeDatabaseQuery, validateQueryAgainstSchema } from "../services/query.service";
 import { AuthRequest } from "../middleware/auth";
-import { Response } from "express";
-import { generateSQLQuery, fetchDatabaseSchema } from "../services/ai.service"; // ✅ Uses AI for schema & query
-import { ConnectionManager } from "../services/connectionmanager";
-import { pool } from "../config/db";
 import logger from "../config/logger";
+import * as ws from "ws";
+type NodeWebSocket = ws.WebSocket;
+import { AuthService } from "../services/auth.service";
+
+console.log("WebSocket Type:", WebSocket);
+console.log("WebSocket Instance Type:", new WebSocket("ws://localhost:8080"));
 
 /**
- * Processes AI-generated query requests and executes them in the backend.
+ * Helper function to send an error response
  */
-export const processQuery = async (req: AuthRequest, res: Response): Promise<void> => {
+const sendErrorResponse = (res: Response, statusCode: number, message: string, error?: Error) => {
+  logger.error(`❌ ${message}${error ? `: ${error.message}` : ""}`);
+  res.status(statusCode).json({ message, error: error?.message });
+};
+
+/**
+ * ✅ REST API: Handles user-submitted SQL queries via HTTP request.
+ */
+export const executeUserQuery = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { user_query, db_type } = req.body;
     const userId = req.user.id;
+    const { dbType, query } = req.body;
 
-    if (!user_query || typeof user_query !== "string") {
-      res.status(400).json({ error: "❌ Missing or invalid query input." });
+    if (!query || typeof query !== "string") {
+      sendErrorResponse(res, 400, "Invalid or missing query.");
       return;
     }
 
-    if (!db_type || typeof db_type !== "string") {
-      res.status(400).json({ error: "❌ Missing or invalid database type." });
+    if (!dbType) {
+      sendErrorResponse(res, 400, "Missing database type.");
       return;
     }
 
-    // ✅ Ensure user is connected
-    if (!ConnectionManager.isConnected(userId, db_type)) {
-      res.status(403).json({ error: "❌ No active database connection found. Please connect first." });
-      return;
-    }
+    logger.info(`📡 User ${userId} is requesting query execution: ${query}`);
 
-    // ✅ Fetch Schema from AI service
-    logger.info(`🔍 Fetching schema for User ${userId}, database type: ${db_type}`);
-    const schema = await fetchDatabaseSchema(userId, db_type);
-
-    if (!schema || schema.length === 0) {
-      res.status(500).json({ error: "❌ Failed to retrieve database schema." });
-      return;
-    }
-
-    logger.info(`✅ Schema retrieved for user ${userId}`);
-
-    // ✅ Generate SQL Query
-    logger.info(`🔍 Generating SQL query for user ${userId}: ${user_query}`);
-    const sqlQuery = await generateSQLQuery(user_query, db_type, schema);
-
-    if (!sqlQuery || typeof sqlQuery !== "string") {
-      throw new Error("AI service returned an invalid response.");
-    }
-
-    // ✅ Security Check: Only allow SELECT queries
-    if (!sqlQuery.trim().toUpperCase().startsWith("SELECT")) {
-      res.status(403).json({ error: "❌ Only SELECT queries are allowed." });
-      return;
-    }
-
-    logger.info(`✅ AI-Generated SQL for user ${userId}: ${sqlQuery}`);
-
-    // ✅ Validate the query against the schema before executing
-    if (!validateSQLAgainstSchema(sqlQuery, schema)) {
-      res.status(400).json({ error: "❌ AI-Generated query does not match schema constraints." });
-      return;
-    }
-
-    // ✅ Execute Query
-    const result = await pool.query(sqlQuery);
-
-    res.json({ success: true, data: result.rows });
-  } catch (error: unknown) {
-    const err = error as Error;
-    logger.error(`❌ Query Execution Failed: ${err.message}`);
-    res.status(500).json({ error: "Failed to execute query.", details: err.message });
+    // ✅ Use the same AI processing function to handle user queries for consistency
+    const result = await processUserQuery(userId, query, dbType);
+    res.json(result);
+  } catch (error) {
+    sendErrorResponse(res, 500, "Query execution failed.", error as Error);
   }
 };
 
 /**
- * Validates the AI-generated SQL query against the database schema.
+ * ✅ WebSocket API: Handles AI-generated query processing.
  */
-function validateSQLAgainstSchema(sqlQuery: string, schema: any[]): boolean {
-  const tables = new Set(schema.map((item) => item.table_name.toLowerCase()));
-  const columns = new Set(schema.map((item) => `${item.table_name.toLowerCase()}.${item.column_name.toLowerCase()}`));
-  const columnDataTypes = new Map(
-    schema.map((item) => [`${item.table_name.toLowerCase()}.${item.column_name.toLowerCase()}`, item.data_type])
-  );
-
-  // ✅ Extract table & column names from the query (Handles Aliases & JOINs)
-  const usedTables = Array.from(sqlQuery.matchAll(/\bFROM\s+([a-zA-Z_][\w]*)/gi)).map((match) => match[1].toLowerCase());
-  const usedColumns = Array.from(sqlQuery.matchAll(/\bSELECT\s+(.*?)\bFROM/gi)).map((match) => match[1].toLowerCase());
-
-  // ✅ Ensure all referenced tables exist
-  for (const table of usedTables) {
-    if (!tables.has(table)) {
-      logger.warn(`❌ Query references non-existent table: ${table}`);
-      return false;
-    }
+export const handleWebSocketAIQuery = (wsClient: NodeWebSocket, req: Request): void => { 
+  if (!(wsClient instanceof ws.WebSocket)) {  // ✅ Ensure WebSocket is from 'ws'
+    logger.error("❌ Invalid WebSocket instance.");
+    return;
   }
+  const socket = wsClient as NodeWebSocket; // ✅ Ensure correct WebSocket instance
 
-  // ✅ Ensure all referenced columns exist & match expected data types
-  for (const column of usedColumns) {
-    const [table, col] = column.split(".");
-    if (!columns.has(`${table}.${col}`)) {
-      logger.warn(`❌ Query references non-existent column: ${table}.${col}`);
-      return false;
+
+
+
+  try {
+    const token = req.headers.authorization?.split(" ")[1];
+    if (!token) {
+      sendWebSocketError(socket, "Unauthorized: Missing token.");
+      return;
     }
 
-    // ✅ Verify data type consistency
-    const expectedType = columnDataTypes.get(`${table}.${col}`);
-    if (!expectedType) {
-      logger.warn(`⚠️ Data type missing for column: ${table}.${col}`);
-      return false;
+    const decoded = AuthService.verifyToken(token);
+    if (!decoded || "error" in decoded) {
+      sendWebSocketError(socket, "Unauthorized: Invalid or expired token.");
+      return;
     }
+
+    const userId = Number(decoded.userId); // ✅ Ensure userId is always a number
+    logger.info(`✅ WebSocket connection established for user ${userId}.`);
+
+    socket.on("message", async (message) => handleWebSocketMessage(socket, userId, message));
+    socket.on("close", () => logger.info(`🔌 WebSocket Disconnected for user ${userId}`));
+
+  } catch (error) {
+    sendWebSocketError(socket, "Server error.", error as Error);
   }
+};
 
-  return true;
-}
+
+/**
+ * Helper function to send error messages via WebSocket
+ */
+const sendWebSocketError = (socket: ws.WebSocket, message: string, error?: Error) => {
+  logger.error(`❌ WebSocket Error: ${message}${error ? `: ${error.message}` : ""}`);
+  socket.send(JSON.stringify({ type: "error", message }));
+  socket.close();
+};
+
+const handleWebSocketMessage = async (socket: ws.WebSocket, userId: number, message: ws.RawData) => {
+  try {
+    const userMessage = message.toString().trim();
+
+    if (!userMessage) {
+      sendWebSocketError(socket, "Invalid input: Empty message.");
+      return;
+    }
+
+    await processAIQuery(userId, userMessage, socket as ws.WebSocket); // ✅ Force correct WebSocket type
+  } catch (error) {
+    sendWebSocketError(socket, "AI Query Processing Failed.", error as Error);
+  }
+};
+
+
+
