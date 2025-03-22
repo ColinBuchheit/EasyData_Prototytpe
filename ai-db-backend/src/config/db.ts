@@ -3,17 +3,20 @@ import { Pool } from "pg";
 import { ENV } from "./env";
 import logger from "./logger";
 import { createClient } from "redis";
-import RedisMock from "ioredis-mock"; // ✅ Mock Redis for local development
+import RedisMock from "ioredis-mock";
+import { MongoClient } from "mongodb";
 
-const MAX_CONNECTIONS = Number(process.env.DB_MAX_CONNECTIONS) || 10; // ✅ Configurable
+const MAX_CONNECTIONS = Number(process.env.DB_MAX_CONNECTIONS) || 10;
 
-// ✅ Lazy Initialization for Redis
+// ========================
+// ✅ REDIS CONFIG
+// ========================
 let redisClient: any = null;
 const getRedisClient = () => {
   if (!redisClient) {
     redisClient =
       ENV.NODE_ENV === "development"
-        ? new RedisMock() // ✅ Use mock Redis in dev
+        ? new RedisMock()
         : createClient({ url: ENV.REDIS_URL || "redis://localhost:6379" });
 
     redisClient.on("error", (err: Error) => {
@@ -26,7 +29,9 @@ const getRedisClient = () => {
   return redisClient;
 };
 
-// ✅ Create PostgreSQL connection pool
+// ========================
+// ✅ POSTGRES CONFIG
+// ========================
 const pool = new Pool({
   host: ENV.DB_HOST,
   port: ENV.DB_PORT,
@@ -34,61 +39,52 @@ const pool = new Pool({
   password: ENV.DB_PASSWORD,
   database: ENV.DB_DATABASE,
   max: MAX_CONNECTIONS,
-  idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
-  connectionTimeoutMillis: 2000, // Wait 2 seconds before timing out
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 2000,
 });
 
-// ✅ Improved Connection Handling
 const connectWithRetry = async (attempts = 3, delay = 5000) => {
   for (let i = 0; i < attempts; i++) {
     const client = await pool.connect();
     try {
-      await client.query("SELECT 1"); // Validates connection
-      logger.info("✅ Database connected successfully.");
+      await client.query("SELECT 1");
+      logger.info("✅ PostgreSQL connected.");
       return;
     } catch (err: unknown) {
-      if (err instanceof Error) {
-        logger.error(`❌ Database connection failed (Attempt ${i + 1}/${attempts}): ${err.message}`);
-      } else {
-        logger.error("❌ Database connection failed due to an unknown error.");
-      }
+      logger.error(`❌ PostgreSQL connection failed (Attempt ${i + 1}/${attempts}): ${err instanceof Error ? err.message : err}`);
       if (i < attempts - 1) {
-        const nextDelay = delay * 2; // Exponential backoff
+        const nextDelay = delay * 2;
         logger.info(`🔄 Retrying in ${nextDelay / 1000} seconds...`);
-        await new Promise((resolve) => setTimeout(resolve, nextDelay));
+        await new Promise((res) => setTimeout(res, nextDelay));
       } else {
-        logger.error("❌ All retry attempts failed. Exiting...");
+        logger.error("❌ All PostgreSQL attempts failed.");
         process.exit(1);
       }
     } finally {
-      client.release(); // ✅ Ensures cleanup of connection
+      client.release();
     }
   }
 };
-
 connectWithRetry();
 
-// ✅ Execution Time Logging for Queries
 const query = async (text: string, params?: any[]) => {
   const start = Date.now();
   const result = await pool.query(text, params);
   const duration = Date.now() - start;
-
-  if (duration > 500) { // Log slow queries (500ms threshold)
-    logger.warn(`🐢 Slow Query Detected: ${text} - Duration: ${duration}ms`);
+  if (duration > 500) {
+    logger.warn(`🐢 Slow Query: ${text} (${duration}ms)`);
   }
   return result;
 };
 
-// ✅ Periodic Health Check (Every 60 seconds)
 const checkDatabaseHealth = async () => {
   setInterval(async () => {
     const client = await pool.connect();
     try {
       await client.query("SELECT 1");
-      logger.info("✅ Database is healthy.");
+      logger.info("✅ PostgreSQL is healthy.");
     } catch (err) {
-      logger.error("⚠️ Database connection lost! Attempting to reconnect...");
+      logger.error("⚠️ PostgreSQL health check failed.");
       await connectWithRetry();
     } finally {
       client.release();
@@ -97,29 +93,68 @@ const checkDatabaseHealth = async () => {
 };
 checkDatabaseHealth();
 
-// ✅ Graceful Shutdown Handling
 const closeDatabase = async () => {
-  logger.info("⚠️ Closing database connection...");
+  logger.info("⚠️ Closing PostgreSQL...");
   await pool.end();
-  logger.info("✅ Database connection closed.");
-  process.exit(0);
+  logger.info("✅ PostgreSQL closed.");
 };
 
 const closeRedis = async () => {
   if (redisClient) {
-    logger.info("⚠️ Closing Redis connection...");
+    logger.info("⚠️ Closing Redis...");
     await redisClient.quit();
-    logger.info("✅ Redis connection closed.");
+    logger.info("✅ Redis closed.");
   }
 };
 
+// ========================
+// ✅ MONGODB CONFIG
+// ========================
+const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/ai_conversations";
+let mongoClient: MongoClient | null = null;
+
+const getMongoClient = async (): Promise<MongoClient> => {
+  if (mongoClient) {
+    return mongoClient;
+  }
+  
+
+  mongoClient = new MongoClient(MONGO_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  } as any);
+
+  await mongoClient.connect();
+  logger.info("✅ MongoDB connected.");
+  return mongoClient;
+};
+
+const closeMongo = async () => {
+  if (mongoClient) {
+    logger.info("⚠️ Closing MongoDB...");
+    await mongoClient.close();
+    logger.info("✅ MongoDB closed.");
+  }
+};
+
+// ========================
+// ✅ SHUTDOWN HOOKS
+// ========================
 process.on("SIGINT", async () => {
   await closeRedis();
+  await closeMongo();
   await closeDatabase();
-});
-process.on("SIGTERM", async () => {
-  await closeRedis();
-  await closeDatabase();
+  process.exit(0);
 });
 
-export { pool, getRedisClient, query };
+process.on("SIGTERM", async () => {
+  await closeRedis();
+  await closeMongo();
+  await closeDatabase();
+  process.exit(0);
+});
+
+// ========================
+// ✅ EXPORTS
+// ========================
+export { pool, getRedisClient, getMongoClient, query };
