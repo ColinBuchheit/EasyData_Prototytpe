@@ -1,33 +1,33 @@
-from fastapi import FastAPI
-import logging
-from src.api.schema_api import router as schema_router
-from src.api.query_api import router as query_router
-from security.auth import verify_api_key
-from src.config.logging_config import logger
+# main.py
 
-# ✅ Initialize FastAPI App
-app = FastAPI(
-    title="AI-Agent Network API",
-    version="1.0",
-    description="An AI-powered API for SQL generation, validation, and schema handling."
-)
+from crew import run_crew_pipeline
+from utils.logger import logger
+from utils.context_cache import get_context, clear_context
+from typing import Dict, Any
 
-# ✅ Register API Routes
-app.include_router(schema_router)
-app.include_router(query_router)
 
-# ✅ Root Endpoint
-@app.get("/")
-async def root():
-    return {"message": "Welcome to the AI-Agent Network API"}
+def run(task: str, user_id: str, db_info: Dict[str, Any], visualize: bool = True):
+    """
+    Triggers the full AI Agent pipeline manually.
+    Returns structured result and prints to console.
+    """
+    logger.info(f"🧠 Running agent pipeline via main.py for user: {user_id}")
 
-# ✅ Health Check Endpoint
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy", "message": "AI-Agent system is running."}
+    result = run_crew_pipeline(
+        task=task,
+        user_id=user_id,
+        db_info=db_info,
+        visualize=visualize
+    )
 
-# ✅ Global Exception Handling
-@app.exception_handler(Exception)
-async def global_exception_handler(request, exc):
-    logger.error(f"Unhandled Exception: {str(exc)}")
-    return {"error": "Internal server error. Please contact support."}
+    print("\n✅ Final Output:")
+    print(result)
+
+    print("\n🧠 Cached Context:")
+    print(get_context(user_id) or {})
+
+    return result
+
+
+if __name__ == "__main__":
+    print("⚠️ No CLI entry implemented. Use the `run()` function from a Python shell or test file.")

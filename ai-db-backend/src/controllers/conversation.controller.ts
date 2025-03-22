@@ -7,9 +7,10 @@ import {
 } from "../services/conversation.service";
 import logger from "../config/logger";
 import { AuthRequest } from "../middleware/auth";
+import { ObjectId } from "mongodb";
 
 /**
- * ✅ Store a new conversation message
+ * ✅ Store a new conversation message in MongoDB
  */
 export const storeConversation = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -21,16 +22,10 @@ export const storeConversation = async (req: AuthRequest, res: Response): Promis
         return;
       }
       
-      if (!message || typeof message !== "string" || message.trim() === "") {
+    if (!message || typeof message !== "string" || message.trim() === "") {
         res.status(400).json({ message: "❌ Valid message is required." });
         return;
       }
-      
-      if (response !== null && typeof response !== "string") {
-        res.status(400).json({ message: "❌ Response must be a string or null." });
-        return;
-      }
-      
 
     const conversation = await saveConversation(userId, agent_name, message, response);
     res.status(201).json({ success: true, conversation });
@@ -41,34 +36,23 @@ export const storeConversation = async (req: AuthRequest, res: Response): Promis
 };
 
 /**
- * ✅ Get conversation history for a user
+ * ✅ Fetch user conversation history from MongoDB
  */
 export const getUserConversations = async (req: AuthRequest, res: Response): Promise<void> => {
-    try {
-      const limit = Number(req.query.limit);
-      const offset = Number(req.query.offset);
-  
-      if (isNaN(limit) || limit < 1 || limit > 100) {
-        res.status(400).json({ message: "❌ Invalid limit value (1-100 allowed)." });
-        return;
-      }
-  
-      if (isNaN(offset) || offset < 0) {
-        res.status(400).json({ message: "❌ Invalid offset value." });
-        return;
-      }
-  
-      const conversations = await fetchUserConversations(req.user.id, limit, offset);
-      res.json({ success: true, conversations });
-    } catch (error) {
-      logger.error(`❌ Error fetching conversations: ${(error as Error).message}`);
-      res.status(500).json({ message: "Error fetching conversations" });
-    }
-  };
-  
+  try {
+    const limit = Number(req.query.limit) || 10;
+    const offset = Number(req.query.offset) || 0;
+
+    const conversations = await fetchUserConversations(req.user.id, limit, offset);
+    res.json({ success: true, conversations });
+  } catch (error) {
+    logger.error(`❌ Error fetching conversations: ${(error as Error).message}`);
+    res.status(500).json({ message: "Error fetching conversations" });
+  }
+};
 
 /**
- * ✅ Get a specific conversation by ID
+ * ✅ Fetch a specific conversation by ID from MongoDB
  */
 export const getConversationById = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -78,7 +62,7 @@ export const getConversationById = async (req: AuthRequest, res: Response): Prom
       return;
     }
 
-    const conversation = await fetchConversationById(Number(conversation_id), req.user.id);
+    const conversation = await fetchConversationById(conversation_id, req.user.id);
     if (!conversation) {
       res.status(404).json({ message: "❌ Conversation not found." });
       return;
@@ -91,26 +75,26 @@ export const getConversationById = async (req: AuthRequest, res: Response): Prom
   }
 };
 
-/**
- * ✅ Delete a conversation
- */
 export const deleteConversation = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { conversation_id } = req.params;
-    if (!conversation_id) {
-      res.status(400).json({ message: "❌ Conversation ID is required." });
+    const userId = req.user.id;
+
+    if (!conversation_id || !ObjectId.isValid(conversation_id)) {
+      res.status(400).json({ success: false, message: "Invalid conversation ID." });
       return;
     }
 
-    const success = await removeConversation(Number(conversation_id), req.user.id);
-    if (!success) {
-      res.status(403).json({ message: "❌ Unauthorized to delete this conversation." });
+    const deleted = await removeConversation(conversation_id, userId);
+
+    if (!deleted) {
+      res.status(404).json({ success: false, message: "Conversation not found or unauthorized." });
       return;
     }
 
-    res.json({ success: true, message: "✅ Conversation deleted successfully." });
+    res.json({ success: true, message: "Conversation deleted successfully." });
   } catch (error) {
     logger.error(`❌ Error deleting conversation: ${(error as Error).message}`);
-    res.status(500).json({ message: "Error deleting conversation" });
+    res.status(500).json({ success: false, message: "Failed to delete conversation." });
   }
 };

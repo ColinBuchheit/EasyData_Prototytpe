@@ -1,78 +1,75 @@
-import { pool } from "../config/db";
-import logger from "../config/logger";
+import { ObjectId } from "mongodb";
+import { getMongoClient } from "../config/db"; // Uses the integrated db.ts file
+
+const COLLECTION = "conversations";
 
 /**
- * ✅ Store a new conversation
+ * ✅ Save a new conversation
  */
-export async function saveConversation(userId: number, agentName: string, message: string, response: string | null) {
-  try {
-    const result = await pool.query(
-      `INSERT INTO conversations (user_id, agent_name, message, response, timestamp, status) 
-       VALUES ($1, $2, $3, $4, NOW(), 'active') 
-       RETURNING *`,
-      [userId, agentName, message, response]
-    );
+export async function saveConversation(
+  userId: string,
+  agentName: string,
+  message: string,
+  response: string | null,
+  agentLogs: any[] = [],
+  context: Record<string, any> = {}
+) {
+  const client = await getMongoClient();
+  const db = client.db();
 
-    return result.rows[0];
-  } catch (error) {
-    logger.error(`❌ Error saving conversation: ${(error as Error).message}`);
-    throw new Error("Failed to save conversation.");
-  }
+  const result = await db.collection(COLLECTION).insertOne({
+    userId,
+    agentName,
+    message,
+    response,
+    agentLogs,
+    context,
+    status: "active",
+    timestamp: new Date()
+  });
+
+  return { _id: result.insertedId };
 }
 
 /**
- * ✅ Get user conversation history (with pagination)
+ * ✅ Get all conversations for a user
  */
-export async function fetchUserConversations(userId: number, limit: number, offset: number) {
-  try {
-    const result = await pool.query(
-      `SELECT * FROM conversations 
-       WHERE user_id = $1 
-       ORDER BY timestamp DESC 
-       LIMIT $2 OFFSET $3`,
-      [userId, limit, offset]
-    );
+export async function fetchUserConversations(userId: string, limit = 10, skip = 0) {
+  const client = await getMongoClient();
+  const db = client.db();
 
-    return result.rows;
-  } catch (error) {
-    logger.error(`❌ Error fetching user conversations: ${(error as Error).message}`);
-    throw new Error("Failed to fetch conversations.");
-  }
+  return db.collection(COLLECTION)
+    .find({ userId })
+    .sort({ timestamp: -1 })
+    .skip(skip)
+    .limit(limit)
+    .toArray();
 }
 
 /**
- * ✅ Get a specific conversation by ID (ensure user owns it)
+ * ✅ Get a specific conversation by ID
  */
-export async function fetchConversationById(conversationId: number, userId: number) {
-    try {
-      const result = await pool.query(
-        `SELECT * FROM conversations 
-         WHERE id = $1 AND user_id = $2`,
-        [conversationId, userId]
-      );
-  
-      return result.rows.length > 0 ? result.rows[0] : null;
-    } catch (error) {
-      logger.error(`❌ Error retrieving conversation ID ${conversationId} for User ${userId}: ${(error as Error).message}`);
-      throw new Error("Failed to retrieve conversation.");
-    }
-  }  
+export async function fetchConversationById(conversationId: string, userId: string) {
+  const client = await getMongoClient();
+  const db = client.db();
+
+  return db.collection(COLLECTION).findOne({
+    _id: new ObjectId(conversationId),
+    userId
+  });
+}
 
 /**
- * ✅ Delete a conversation (only if user owns it)
+ * ✅ Delete a conversation by ID
  */
-export async function removeConversation(conversationId: number, userId: number) {
-  try {
-    const result = await pool.query(
-      `DELETE FROM conversations 
-       WHERE id = $1 AND user_id = $2 
-       RETURNING *`,
-      [conversationId, userId]
-    );
+export async function removeConversation(conversationId: string, userId: string) {
+  const client = await getMongoClient();
+  const db = client.db();
 
-    return result.rows.length > 0;
-  } catch (error) {
-    logger.error(`❌ Error deleting conversation: ${(error as Error).message}`);
-    throw new Error("Failed to delete conversation.");
-  }
+  const result = await db.collection(COLLECTION).deleteOne({
+    _id: new ObjectId(conversationId),
+    userId
+  });
+
+  return result.deletedCount === 1;
 }

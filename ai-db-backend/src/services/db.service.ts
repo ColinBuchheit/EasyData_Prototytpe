@@ -141,30 +141,6 @@ export async function deleteUser(adminId: number, userId: number): Promise<any> 
   return result.rows[0];
 }
 
-/**
- * ✅ Create a conversation (ensure max length for messages).
- */
-export async function createConversation(userId: number, agentName: string, message: string, response: string): Promise<any> {
-  if (message.length > 2000 || response.length > 2000) {
-    throw new Error("❌ Message or response too long.");
-  }
 
-  const result = await pool.query(
-    `INSERT INTO conversations (user_id, agent_name, message, response) VALUES ($1, $2, $3, $4) RETURNING *`,
-    [userId, agentName, message, response]
-  );
-  return result.rows[0];
-}
-
-/**
- * ✅ Fetch conversations with pagination.
- */
-export async function getConversations(userId: number, limit = 20, offset = 0): Promise<any[]> {
-  const result = await pool.query(
-    `SELECT * FROM conversations WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
-    [userId, limit, offset]
-  );
-  return result.rows;
-}
 
 

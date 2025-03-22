@@ -9,8 +9,7 @@ import {
   createUser as createUserService,  // ✅ Prevents import conflicts
   updateUserRole as updateUserRoleService,
   deleteUser as deleteUserService,
-  createConversation as createConversationService,
-  getConversations as getConversationsService
+
 } from "../services/db.service";
 
 import logger from "../config/logger";
@@ -147,28 +146,3 @@ export async function handleDeleteUser(req: AuthRequest, res: Response): Promise
 /**
  * ✅ Create a new conversation.
  */
-export async function handleCreateConversation(req: AuthRequest, res: Response): Promise<void> {
-  try {
-    const { agentName, message, response } = req.body;
-    const userId = req.user.id;
-
-    const conversation = await createConversationService(userId, agentName, message, response); // ✅ Matches correct argument count
-    res.json({ success: true, conversation });
-  } catch (error) {
-    res.status(500).json({ message: "❌ Failed to create conversation.", error: (error as Error).message });
-  }
-}
-
-/**
- * ✅ Fetch a user's conversation history.
- */
-export async function handleGetConversations(req: AuthRequest, res: Response): Promise<void> {
-  try {
-    const userId = req.user.id;
-    const conversations = await getConversationsService(userId); // ✅ Matches correct argument count
-    res.json({ success: true, conversations });
-  } catch (error) {
-    res.status(500).json({ message: "❌ Failed to retrieve conversations.", error: (error as Error).message });
-  }
-}
-

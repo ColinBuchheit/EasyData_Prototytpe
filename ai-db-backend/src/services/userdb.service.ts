@@ -1,5 +1,7 @@
 import { pool } from "../config/db";
 import logger from "../config/logger";
+import { getClientForDB } from "./userdbClients/adapter";
+import type { UserDatabase } from "../models/userDatabase.model";
 
 /**
  * ✅ Create a new database connection.
@@ -23,6 +25,13 @@ export const createDatabaseConnection = async (
   }
 };
 
+export const runQueryOnUserDB = async (
+  db: UserDatabase,
+  query: string
+): Promise<any> => {
+  const client = getClientForDB(db.db_type);
+  return await client.runQuery(db, query);
+};
 /**
  * ✅ Fetch all databases owned by the user.
  */

@@ -10,8 +10,7 @@ import {
   handleCreateUser as createUser, // ✅ Fixes incorrect import
   handleUpdateUserRole as updateUserRole,
   handleDeleteUser as deleteUser,
-  handleCreateConversation as createConversation, // ✅ Fixes incorrect import
-  handleGetConversations as getConversations
+
 } from "../controllers/db.controller";
 
 
@@ -36,8 +35,5 @@ router.post("/user", verifyToken, requireRole(["admin"]), createUser);
 router.put("/user/:id/role", verifyToken, requireRole(["admin"]), updateUserRole);
 router.delete("/user/:id", verifyToken, requireRole(["admin"]), deleteUser);
 
-// ✅ Conversation Management
-router.post("/conversation", verifyToken, createConversation);
-router.get("/conversations", verifyToken, getConversations);
 
 export default router;

@@ -5,6 +5,9 @@ import logger from "../config/logger";
 import * as ws from "ws";
 type NodeWebSocket = ws.WebSocket;
 import { AuthService } from "../services/auth.service";
+import { fetchDatabaseById, runQueryOnUserDB } from "../services/userdb.service"; // ✅ Your new logic
+import { runOrchestration } from "../services/agent.service";
+
 
 console.log("WebSocket Type:", WebSocket);
 console.log("WebSocket Instance Type:", new WebSocket("ws://localhost:8080"));
@@ -79,6 +82,64 @@ export const handleWebSocketAIQuery = (wsClient: NodeWebSocket, req: Request): v
 
   } catch (error) {
     sendWebSocketError(socket, "Server error.", error as Error);
+  }
+};
+
+export const processAIOrchestration = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user.id;
+    const { dbId, task, visualize = true } = req.body;
+
+    if (!dbId || !task) {
+      sendErrorResponse(res, 400, "Missing required fields: dbId or task.");
+      return;
+    }
+
+    const userDB = await fetchDatabaseById(userId, dbId);
+    if (!userDB) {
+      sendErrorResponse(res, 404, `Database ${dbId} not found.`);
+      return;
+    }
+
+    const orchestrationInput = {
+      task,
+      database: userDB,
+      options: { visualize }
+    };
+
+    const result = await runOrchestration(orchestrationInput);
+    res.json(result);
+
+  } catch (error) {
+    sendErrorResponse(res, 500, "Failed to run agent orchestration.", error as Error);
+  }
+};
+
+export const executeUserDBQuery = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user.id;
+    const { dbId, query } = req.body;
+
+    if (!dbId || typeof dbId !== "number") {
+      sendErrorResponse(res, 400, "Missing or invalid dbId.");
+      return;
+    }
+
+    if (!query || typeof query !== "string") {
+      sendErrorResponse(res, 400, "Invalid or missing query.");
+      return;
+    }
+
+    const userDB = await fetchDatabaseById(userId, dbId);
+    if (!userDB) {
+      sendErrorResponse(res, 404, `Database connection ${dbId} not found.`);
+      return;
+    }
+
+    const result = await runQueryOnUserDB(userDB, query);
+    res.json({ result });
+  } catch (error) {
+    sendErrorResponse(res, 500, "Failed to run query on user database.", error as Error);
   }
 };
 
