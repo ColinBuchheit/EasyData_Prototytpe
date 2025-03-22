@@ -1,11 +1,14 @@
+// src/models/conversation.model.ts
 export interface Conversation {
-  id: number;
-  user_id: number;
-  agent_name: string;
-  user_message: string;
-  agents_contributed: string[]; // ✅ Stores list of agents that worked on the response
+  _id?: string;
+  userId: number;
+  dbId?: number | null;
+  userMessage: string;
   response?: string | null;
-  orchestration_logs?: string[]; // ✅ Logs decisions made by the Orchestration Agent
-  timestamp: Date | string;
-  status: "active" | "archived" | "resolved";
+  agentsInvolved: string[];
+  processingStatus: "pending" | "in_progress" | "completed" | "error";
+  errorLog?: string | null;
+  executionTimeMs?: number | null;
+  timestamp: Date;
+  metadata?: Record<string, any> | null;
 }

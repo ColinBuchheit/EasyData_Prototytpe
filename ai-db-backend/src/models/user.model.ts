@@ -1,13 +1,14 @@
+// src/models/user.model.ts
 export interface User {
   id: number;
   username: string;
-  email?: string | null;
+  email: string | null;
   password_hash: string;
-  password_salt?: string;
+  password_salt?: string | null;
   role: "admin" | "user" | "read-only";
   is_active: boolean;
-  two_factor_enabled?: boolean; // ✅ Tracks whether 2FA is enabled
-  created_at: Date | string;
-  updated_at?: Date | string;
-  last_login?: Date | string;
+  two_factor_enabled: boolean;
+  created_at: Date;
+  updated_at: Date;
+  last_login?: Date | null;
 }

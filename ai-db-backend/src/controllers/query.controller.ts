@@ -5,8 +5,16 @@ import logger from "../config/logger";
 import * as ws from "ws";
 type NodeWebSocket = ws.WebSocket;
 import { AuthService } from "../services/auth.service";
-import { fetchDatabaseById, runQueryOnUserDB } from "../services/userdb.service"; // ✅ Your new logic
+import { fetchDatabaseById, fetchUserDatabases, runQueryOnUserDB } from "../services/userdb.service"; // ✅ Your new logic
 import { runOrchestration } from "../services/agent.service";
+import { 
+  detectDatabaseFromQuery, 
+  detectContextSwitch, 
+  getCurrentDatabaseContext,
+  selectDatabaseForQuery 
+} from "../services/databaseContext.service";
+import { handleMultiDatabaseQuery } from "../services/multiDbQuery.service";
+import { getMongoClient } from "../config/db";
 
 
 console.log("WebSocket Type:", WebSocket);
@@ -167,6 +175,98 @@ const handleWebSocketMessage = async (socket: ws.WebSocket, userId: number, mess
     sendWebSocketError(socket, "AI Query Processing Failed.", error as Error);
   }
 };
+
+// Add this new method for smart queries
+export const processAIQueryWithContext = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user.id;
+    const { task } = req.body;
+    
+    if (!task) {
+      sendErrorResponse(res, 400, "Missing required field: task.");
+      return;
+    }
+    
+    // Step 1: Check for explicit context switching
+    const contextSwitch = await detectContextSwitch(userId, task);
+    if (contextSwitch.switched) {
+      // Database context was switched, inform the user
+      res.json({
+        success: true,
+        message: contextSwitch.message,
+        dbId: contextSwitch.dbId
+      });
+      return;
+    }
+    
+    // Step 2: Check if this is a multi-database query
+    const isMultiDbQuery = /across databases|from (all|both) (my|databases|dbs)/i.test(task);
+    
+    if (isMultiDbQuery) {
+      // Fetch all user databases
+      const allDatabases = await fetchUserDatabases(userId);
+      const dbIds = allDatabases.map(db => db.id);
+      
+      // Process multi-database query
+      const result = await handleMultiDatabaseQuery(userId, task, dbIds);
+      res.json(result);
+      return;
+    }
+    
+    // Step 3: Use intelligent AI-based database selection
+    let dbId = await selectDatabaseForQuery(userId, task);
+    
+    if (!dbId) {
+      // Fall back to current context
+      dbId = await getCurrentDatabaseContext(userId);
+    }
+    
+    if (!dbId) {
+      sendErrorResponse(res, 400, "Could not determine which database to use. Please specify a database.");
+      return;
+    }
+    
+    // Fetch the selected database
+    const userDB = await fetchDatabaseById(userId, dbId);
+    if (!userDB) {
+      sendErrorResponse(res, 404, `Database ${dbId} not found.`);
+      return;
+    }
+    
+    // Standard processing with the detected database
+    const orchestrationInput = {
+      task,
+      database: userDB,
+      options: { visualize: true }
+    };
+    
+    const result = await runOrchestration(orchestrationInput);
+    
+    // Update query history for better future matching
+    await recordQueryHistory(userId, dbId, task);
+    
+    res.json(result);
+    
+  } catch (error) {
+    sendErrorResponse(res, 500, "Failed to process query with context.", error as Error);
+  }
+};
+
+// Add tracking for query history
+async function recordQueryHistory(userId: number, dbId: number, query: string): Promise<void> {
+  try {
+    const client = await getMongoClient();
+    await client.db().collection('query_history').insertOne({
+      userId: userId.toString(),
+      dbId,
+      query,
+      timestamp: new Date()
+    });
+  } catch (error) {
+    logger.error(`❌ Error recording query history: ${(error as Error).message}`);
+    // Non-critical operation, so we just log the error but don't throw
+  }
+}
 
 
 

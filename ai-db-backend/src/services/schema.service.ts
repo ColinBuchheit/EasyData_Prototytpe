@@ -1,6 +1,31 @@
 import { pool } from "../config/db";
 import logger from "../config/logger";
+import { getMongoClient } from "../config/db";
+import axios from "axios";
+import { fetchDatabaseById } from "./userdb.service";
 
+
+
+interface SchemaMetadata {
+  dbId: number;
+  userId: number;
+  dbType: string;
+  dbName: string;
+  tables: {
+    name: string;
+    purpose: string;
+    fields: {
+      name: string;
+      type: string;
+      description: string;
+    }[];
+    exampleQueries: string[];
+  }[];
+  domainType: string;
+  contentDescription: string;
+  dataCategory: string[];
+  updatedAt: Date;
+}
 /**
  * ✅ Fetch all tables from the user's connected database.
  */
@@ -96,4 +121,120 @@ const extractTablesFromQuery = (query: string): string[] => {
   }
 
   return tables;
+};
+
+export const analyzeAndStoreDbSchema = async (userId: number, dbId: number): Promise<SchemaMetadata | null> => {
+  try {
+    // Fetch database details
+    const db = await fetchDatabaseById(userId, dbId);
+    if (!db) return null;
+    
+    // Get all tables
+    const tables = await fetchAllTables(db.db_type);
+    if (!tables.length) return null;
+    
+    // Create schema structure to analyze
+    const schemaDetails = [];
+    for (const table of tables) {
+      const columns = await fetchTableSchema(db.db_type, table);
+      schemaDetails.push({
+        table,
+        columns
+      });
+    }
+    
+    // Ask AI to analyze the schema
+    const aiResponse = await axios.post("http://ai-agent-network:5001/run", {
+      operation: "analyze_schema",
+      userId,
+      dbId,
+      dbType: db.db_type,
+      dbName: db.database_name,
+      schemaDetails
+    });
+    
+    if (!aiResponse.data.success) {
+      logger.error(`❌ AI schema analysis failed for database ${dbId}`);
+      return null;
+    }
+    
+    const metadata: SchemaMetadata = {
+      userId,
+      dbId,
+      dbType: db.db_type,
+      dbName: db.database_name,
+      tables: aiResponse.data.tables,
+      domainType: aiResponse.data.domainType,
+      contentDescription: aiResponse.data.contentDescription,
+      dataCategory: aiResponse.data.dataCategory,
+      updatedAt: new Date()
+    };
+    
+    // Store in MongoDB
+    const client = await getMongoClient();
+    await client.db().collection('database_metadata').updateOne(
+      { dbId, userId },
+      { $set: metadata },
+      { upsert: true }
+    );
+    
+    logger.info(`✅ Database schema analyzed and metadata stored for DB ${dbId}`);
+    return metadata;
+    
+  } catch (error) {
+    logger.error(`❌ Error analyzing database schema: ${(error as Error).message}`);
+    return null;
+  }
+};
+
+// Add function to retrieve schema metadata
+export const getDbMetadata = async (userId: number, dbId: number): Promise<SchemaMetadata | null> => {
+  try {
+    const client = await getMongoClient();
+    const document = await client.db().collection('database_metadata')
+      .findOne({ dbId, userId });
+    
+    if (!document) return null;
+    
+    // Properly convert MongoDB document to SchemaMetadata
+    return {
+      dbId: document.dbId,
+      userId: document.userId,
+      dbType: document.dbType,
+      dbName: document.dbName,
+      tables: document.tables || [],
+      domainType: document.domainType || "",
+      contentDescription: document.contentDescription || "",
+      dataCategory: document.dataCategory || [],
+      updatedAt: document.updatedAt || new Date()
+    } as SchemaMetadata;
+  } catch (error) {
+    logger.error(`❌ Error retrieving database metadata: ${(error as Error).message}`);
+    return null;
+  }
+};
+
+export const getAllDbMetadata = async (userId: number): Promise<SchemaMetadata[]> => {
+  try {
+    const client = await getMongoClient();
+    const documents = await client.db().collection('database_metadata')
+      .find({ userId })
+      .toArray();
+    
+    // Explicitly map MongoDB documents to SchemaMetadata array
+    return documents.map(doc => ({
+      dbId: doc.dbId,
+      userId: doc.userId,
+      dbType: doc.dbType,
+      dbName: doc.dbName,
+      tables: doc.tables || [],
+      domainType: doc.domainType || "",
+      contentDescription: doc.contentDescription || "",
+      dataCategory: doc.dataCategory || [],
+      updatedAt: doc.updatedAt || new Date()
+    } as SchemaMetadata));
+  } catch (error) {
+    logger.error(`❌ Error retrieving all database metadata: ${(error as Error).message}`);
+    return [];
+  }
 };

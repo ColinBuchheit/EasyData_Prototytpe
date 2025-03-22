@@ -8,6 +8,8 @@ import {
 } from "../services/userdb.service";
 import logger from "../config/logger";
 import { AuthRequest } from "../middleware/auth";
+import { analyzeAndStoreDbSchema } from "../services/schema.service";
+
 
 /**
  * ✅ Create a new database connection.
@@ -22,7 +24,23 @@ export const createUserDatabase = async (req: AuthRequest, res: Response): Promi
     }
 
     const newConnection = await createDatabaseConnection(req.user.id, { dbType, host, port, username, password, dbName });
-    res.status(201).json({ success: true, message: "✅ Database connection created.", data: newConnection });
+    
+    // Schedule schema analysis in the background
+    analyzeAndStoreDbSchema(req.user.id, newConnection.id)
+      .then(metadata => {
+        if (metadata) {
+          logger.info(`✅ Schema analysis complete for DB ${newConnection.id}`);
+        }
+      })
+      .catch(err => {
+        logger.error(`❌ Background schema analysis failed: ${err.message}`);
+      });
+    
+    res.status(201).json({ 
+      success: true, 
+      message: "✅ Database connection created and schema analysis started.", 
+      data: newConnection 
+    });
   } catch (error) {
     logger.error(`❌ Error creating database connection: ${(error as Error).message}`);
     res.status(500).json({ message: "Error creating database connection." });
