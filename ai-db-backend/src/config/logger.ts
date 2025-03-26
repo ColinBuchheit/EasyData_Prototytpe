@@ -1,29 +1,23 @@
 // src/config/logger.ts
 import winston from "winston";
 import DailyRotateFile from "winston-daily-rotate-file";
-import { Pool } from "pg";
 import { ENV } from "./env";
 
-const { combine, timestamp, printf, colorize } = winston.format;
+const { combine, timestamp, printf, colorize, splat, json } = winston.format;
 
-const enableDBLogging = process.env.LOG_DB === "true";
-const LOG_LEVEL = process.env.LOG_LEVEL || "info";
+// Check if we should log to console in production
+const LOG_TO_CONSOLE = process.env.LOG_TO_CONSOLE !== 'false';
+const LOG_LEVEL = ENV.LOG_LEVEL || "info";
+const LOG_FORMAT = ENV.LOG_FORMAT || "combined";
 
-const pool = enableDBLogging
-  ? new Pool({
-      host: ENV.DB_HOST,
-      port: ENV.DB_PORT,
-      user: ENV.DB_USER,
-      password: ENV.DB_PASSWORD,
-      database: ENV.DB_DATABASE,
-      max: 5,
-    })
-  : null;
-
-const logFormat = printf(({ level, message, timestamp }) => {
-  return `${timestamp} ${level}: ${message}`;
+// Define log format
+const logFormat = printf(({ level, message, timestamp, context, ...meta }) => {
+  const contextStr = context ? `[${context}] ` : '';
+  const metaStr = Object.keys(meta).length ? ` ${JSON.stringify(meta)}` : '';
+  return `${timestamp} ${level}: ${contextStr}${message}${metaStr}`;
 });
 
+// Create file transports
 const errorTransport = new DailyRotateFile({
   filename: "logs/error-%DATE%.log",
   datePattern: "YYYY-MM-DD",
@@ -41,74 +35,52 @@ const combinedTransport = new DailyRotateFile({
   zippedArchive: true,
 });
 
+// Configure transports
+const transports: winston.transport[] = [
+  errorTransport,
+  combinedTransport
+];
+
+// Add console transport in development or if explicitly enabled
+if (ENV.NODE_ENV !== 'production' || LOG_TO_CONSOLE) {
+  transports.push(new winston.transports.Console({
+    format: combine(
+      colorize(),
+      timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+      logFormat
+    )
+  }));
+}
+
+// Create the logger
 const logger = winston.createLogger({
   level: LOG_LEVEL,
-  format: combine(colorize(), timestamp(), logFormat),
-  transports: [
-    new winston.transports.Console(),
-    errorTransport,
-    combinedTransport,
-  ],
+  format: combine(
+    timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+    splat(),
+    LOG_FORMAT === 'json' ? json() : logFormat
+  ),
+  transports,
+  exitOnError: false
 });
 
-// ✅ Ensure Log Table Exists
-const ensureLogTable = async () => {
-  if (!enableDBLogging || !pool) return;
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS logs (
-        id SERIAL PRIMARY KEY,
-        level VARCHAR(10),
-        message TEXT,
-        timestamp TIMESTAMP DEFAULT NOW()
-      );
-    `);
-    logger.info("✅ Logs table ensured.");
-  } catch (err) {
-    logger.error(`❌ Failed to ensure logs table: ${(err as Error).message}`);
-  }
-};
+// Create context loggers for different components
+export function createContextLogger(context: string) {
+  const contextLogger = {
+    info: (message: string, meta: object = {}) => logger.info(message, { context, ...meta }),
+    warn: (message: string, meta: object = {}) => logger.warn(message, { context, ...meta }),
+    error: (message: string, meta: object = {}) => logger.error(message, { context, ...meta }),
+    debug: (message: string, meta: object = {}) => logger.debug(message, { context, ...meta }),
+    verbose: (message: string, meta: object = {}) => logger.verbose(message, { context, ...meta }),
+  };
 
-// ✅ Batch Logging to Database
-const logBuffer: { level: string; message: string }[] = [];
-const BATCH_INTERVAL = 5000;
-const MAX_BATCH_SIZE = 10;
-
-async function logToDatabase(level: string, message: string) {
-  if (!enableDBLogging || !pool) return;
-  logBuffer.push({ level, message });
-
-  if (logBuffer.length >= MAX_BATCH_SIZE) {
-    await flushLogs();
-  }
+  return contextLogger;
 }
 
-async function flushLogs() {
-  if (logBuffer.length === 0 || !pool) return;
-  const logsToInsert = [...logBuffer];
+// Handle uncaught exceptions and unhandled rejections
+logger.exceptions.handle(
+  new winston.transports.File({ filename: 'logs/exceptions.log' })
+);
 
-  try {
-    const values = logsToInsert.map(log => `('${log.level}', '${log.message.replace(/'/g, "''")}', NOW())`).join(", ");
-    await pool.query(`INSERT INTO logs (level, message, timestamp) VALUES ${values}`);
-    logBuffer.length = 0; // ✅ Clear buffer only on success
-  } catch (err) {
-    logger.error(`❌ Failed to batch log messages: ${(err as Error).message}`);
-  }
-}
-
-setInterval(flushLogs, BATCH_INTERVAL);
-
-logger.on("error", (error) => logToDatabase("error", error.message));
-
-process.on("exit", async () => {
-  await flushLogs();
-  if (pool) {
-    await pool.end();
-  }
-  logger.info("✅ Logs flushed before exit.");
-});
-
-ensureLogTable();
-
-export { logger, logToDatabase };
+// Export the logger
 export default logger;

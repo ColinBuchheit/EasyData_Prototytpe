@@ -1,3 +1,4 @@
+// src/app.ts
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -5,22 +6,22 @@ import helmet from "helmet";
 import compression from "compression";
 import morgan from "morgan";
 import logger from "./config/logger";
+import { globalErrorHandler } from "./shared/utils/errorHandler";
 
-// ✅ Import Routes
-import authRoutes from "./routes/auth.routes";
-import userRoutes from "./routes/user.routes";
-import userdbRoutes from "./routes/userdb.routes";
-import queryRoutes from "./routes/query.routes";
-import schemaRoutes from "./routes/schema.routes";
-import analyticsRoutes from "./routes/analytics.routes";
+// Import Routes from modules
+import authRoutes from "./modules/auth/routes";
+import databaseRoutes from "./modules/database/routes";
+import queryRoutes from "./modules/query/routes";
+import analyticsRoutes from "./modules/analytics/routes";
+import userRoutes from "./modules/user/routes";
 
-// ✅ Load environment variables
+// Load environment variables
 dotenv.config();
 
-// ✅ Initialize Express App
+// Initialize Express App
 const app = express();
 
-// ✅ Middleware
+// Middleware
 app.use(cors());
 app.use(helmet());
 app.use(compression());
@@ -28,25 +29,36 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan("dev"));
 
-// ✅ API Routes
+// API Routes
 app.use("/api/auth", authRoutes);
-app.use("/api/users", userRoutes);
-app.use("/api/userdb", userdbRoutes);
+app.use("/api/database", databaseRoutes);
 app.use("/api/query", queryRoutes);
-app.use("/api/schema", schemaRoutes);
 app.use("/api/analytics", analyticsRoutes);
+app.use("/api/users", userRoutes);
 
-// ✅ Root API Route
+// Root API Route
 app.get("/", (req, res) => {
   logger.info("✅ API is running");
-  res.json({ message: "🚀 EasyData API is running successfully!" });
+  res.json({ 
+    success: true,
+    message: "🚀 EasyData API is running successfully!",
+    version: process.env.npm_package_version || "1.0.0",
+    environment: process.env.NODE_ENV || "development"
+  });
 });
 
-// ✅ Error Handling Middleware
-app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  logger.error(`❌ Internal Server Error: ${err.message}`);
-  res.status(500).json({ message: "Internal Server Error" });
+// 404 handler
+app.use((req, res, next) => {
+  res.status(404).json({
+    success: false,
+    message: "Resource not found",
+    error: "NOT_FOUND",
+    statusCode: 404,
+    path: req.originalUrl
+  });
 });
 
-// ✅ Export Express App
+// Global error handling middleware
+app.use(globalErrorHandler);
+
 export default app;
