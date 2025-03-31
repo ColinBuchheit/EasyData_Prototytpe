@@ -36,4 +36,49 @@ if (apiPaths.length === 0) {
 }
 
 // Improved Swagger Options
-const
+const swaggerOptions = {
+  definition: {
+    openapi: "3.0.0",
+    info: {
+      title: "EasyData API",
+      version: "1.0.0",
+      description: "AI-powered database query and visualization API",
+      contact: {
+        name: "API Support",
+        email: "support@easydata.com"
+      },
+      license: {
+        name: "MIT",
+        url: "https://opensource.org/licenses/MIT"
+      }
+    },
+    servers,
+    components: {
+      securitySchemes: {
+        bearerAuth: {
+          type: "http",
+          scheme: "bearer",
+          bearerFormat: "JWT"
+        }
+      }
+    },
+    security: [
+      {
+        bearerAuth: []
+      }
+    ],
+    tags: [
+      { name: 'Auth', description: 'Authentication endpoints' },
+      { name: 'Database', description: 'Database connection management' },
+      { name: 'Query', description: 'Database query execution' },
+      { name: 'Analytics', description: 'Usage and performance analytics' },
+      { name: 'User', description: 'User management' }
+    ]
+  },
+  apis: apiPaths
+};
+
+// Generate Swagger specification
+const swaggerSpec = swaggerJSDoc(swaggerOptions);
+
+export default swaggerSpec;

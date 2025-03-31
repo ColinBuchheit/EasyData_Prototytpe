@@ -31,9 +31,8 @@ export const getUserPreferences = asyncHandler(async (req: AuthRequest, res: Res
 /**
  * Update user preferences
  */
-Let me continue with the implementation of the preference.controller.ts file and complete the User module:
-typescriptCopy// src/modules/user/controllers/preference.controller.ts (continued)
-/**
+
+/**Let
  * Update user preferences
  */
 export const updateUserPreferences = asyncHandler(async (req: AuthRequest, res: Response) => {

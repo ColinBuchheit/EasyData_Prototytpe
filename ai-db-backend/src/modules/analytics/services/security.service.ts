@@ -2,7 +2,7 @@
 
 import { getMongoClient } from "../../../config/db";
 import { createContextLogger } from "../../../config/logger";
-import { SecurityMetric, SecurityEventType } from "../models/metric.model";
+import { SecurityMetric, SecurityEventType, SecurityMetricImpl } from "../models/metric.model";
 import { SecurityReport } from "../models/report.model";
 
 const securityLogger = createContextLogger("SecurityAnalytics");
@@ -20,7 +20,7 @@ export class SecurityService {
       sourceIp?: string;
       [key: string]: any;
     }
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       const client = await getMongoClient();
       
@@ -35,18 +35,56 @@ export class SecurityService {
         details
       };
       
-      await client.db().collection('security_metrics').insertOne(metric);
+      // Use the class implementation for validation
+      const securityMetric = new SecurityMetricImpl(metric);
+      
+      if (!securityMetric.validate()) {
+        securityLogger.warn(`Invalid security event data: ${JSON.stringify(metric)}`);
+        return false;
+      }
+      
+      await client.db().collection('security_metrics').insertOne(securityMetric.toJSON());
       
       // Log critical and high severity events
       if (severity === 'critical' || severity === 'high') {
         securityLogger.error(`Security event: ${eventType} - ${description} (${severity})`);
+        
+        // Trigger notification for critical events
+        this.notifyCriticalEvent(securityMetric.toJSON());
       } else {
         securityLogger.warn(`Security event: ${eventType} - ${description} (${severity})`);
       }
+      
+      return true;
     } catch (error) {
       securityLogger.error(`Error tracking security event: ${(error as Error).message}`);
       // Still log the security event even if we couldn't store it
       securityLogger.error(`Failed to record security event: ${eventType} - ${description} (${severity})`);
+      return false;
+    }
+  }
+
+  /**
+   * Notify about critical security events
+   */
+  static async notifyCriticalEvent(event: SecurityMetric): Promise<void> {
+    try {
+      const client = await getMongoClient();
+      
+      // Store notification
+      await client.db().collection('security_notifications').insertOne({
+        event,
+        notified: false,
+        notificationTime: new Date(),
+        attempts: 0,
+        maxAttempts: 3
+      });
+      
+      // Add any external notification logic here (like sending to admin notification queue)
+      
+      securityLogger.info(`Critical security event notification created: ${event.eventType} - ${event.description}`);
+    } catch (error) {
+      securityLogger.error(`Failed to create notification for critical event: ${(error as Error).message}`);
     }
   }
 
@@ -69,7 +107,21 @@ export class SecurityService {
         }
       );
       
-      return result.modifiedCount > 0;
+      const success = result.modifiedCount > 0;
+      
+      if (success) {
+        securityLogger.info(`Security event ${eventId} marked as resolved`);
+        
+        // Update any pending notifications
+        await client.db().collection('security_notifications').updateOne(
+          { 'event._id': new ObjectId(eventId) },
+          { $set: { resolved: true, resolvedAt: new Date() } }
+        );
+      } else {
+        securityLogger.warn(`Failed to resolve security event ${eventId}: Event not found`);
+      }
+      
+      return success;
     } catch (error) {
       securityLogger.error(`Error resolving security event: ${(error as Error).message}`);
       return false;
@@ -114,7 +166,8 @@ export class SecurityService {
         ])
         .toArray();
       
-      return result;
+      // Cast the result to the expected type
+      return result as { type: string; count: number }[];
     } catch (error) {
       securityLogger.error(`Error getting security events by type: ${(error as Error).message}`);
       return [];
@@ -161,7 +214,18 @@ export class SecurityService {
         ])
         .toArray();
       
-      return result;
+      // Cast the MongoDB result to our expected type
+      const typedResult = result as { severity: string; count: number }[];
+      
+      // Sort in the correct order (critical, high, medium, low)
+      const severityOrder = { critical: 4, high: 3, medium: 2, low: 1 };
+      typedResult.sort((a, b) => {
+        const severityA = a.severity as keyof typeof severityOrder;
+        const severityB = b.severity as keyof typeof severityOrder;
+        return severityOrder[severityB] - severityOrder[severityA];
+      });
+      
+      return typedResult;
     } catch (error) {
       securityLogger.error(`Error getting security events by severity: ${(error as Error).message}`);
       return [];
@@ -211,7 +275,8 @@ export class SecurityService {
         ])
         .toArray();
       
-      return result;
+      // Cast the result to the expected type
+      return result as { sourceIp: string; count: number }[];
     } catch (error) {
       securityLogger.error(`Error getting top security event sources: ${(error as Error).message}`);
       return [];
@@ -245,6 +310,29 @@ export class SecurityService {
   }
 
   /**
+   * Get unresolved critical events that require immediate attention
+   */
+  static async getUnresolvedCriticalEvents(): Promise<SecurityMetric[]> {
+    try {
+      const client = await getMongoClient();
+      
+      const events = await client.db().collection('security_metrics')
+        .find({
+          resolved: false,
+          severity: { $in: ['critical', 'high'] }
+        })
+        .sort({ timestamp: -1 })
+        .toArray();
+      
+      // Cast the MongoDB result to SecurityMetric[]
+      return events as unknown as SecurityMetric[];
+    } catch (error) {
+      securityLogger.error(`Error getting unresolved critical events: ${(error as Error).message}`);
+      return [];
+    }
+  }
+
+  /**
    * Get security report
    */
   static async getSecurityReport(startDate?: Date, endDate?: Date): Promise<SecurityReport> {
@@ -268,7 +356,8 @@ export class SecurityService {
         eventsByType,
         eventsBySeverity,
         topSources,
-        unresolvedEvents
+        unresolvedEvents,
+        generatedAt: new Date()
       };
     } catch (error) {
       securityLogger.error(`Error generating security report: ${(error as Error).message}`);
@@ -279,7 +368,8 @@ export class SecurityService {
         eventsByType: [],
         eventsBySeverity: [],
         topSources: [],
-        unresolvedEvents: 0
+        unresolvedEvents: 0,
+        generatedAt: new Date()
       };
     }
   }
@@ -305,6 +395,37 @@ export class SecurityService {
     } catch (error) {
       securityLogger.error(`Error getting total security events: ${(error as Error).message}`);
       return 0;
+    }
+  }
+
+  /**
+   * Create necessary indexes for security metrics
+   */
+  static async ensureIndexes(): Promise<boolean> {
+    try {
+      const client = await getMongoClient();
+      
+      // Create indexes for security_metrics collection
+      await client.db().collection('security_metrics').createIndex({ eventType: 1 });
+      await client.db().collection('security_metrics').createIndex({ severity: 1 });
+      await client.db().collection('security_metrics').createIndex({ timestamp: 1 });
+      await client.db().collection('security_metrics').createIndex({ userId: 1 });
+      await client.db().collection('security_metrics').createIndex({ sourceIp: 1 });
+      await client.db().collection('security_metrics').createIndex({ resolved: 1 });
+      
+      // Compound indexes for common queries
+      await client.db().collection('security_metrics').createIndex({ resolved: 1, severity: 1 });
+      await client.db().collection('security_metrics').createIndex({ eventType: 1, timestamp: 1 });
+      
+      // Create indexes for security_notifications collection
+      await client.db().collection('security_notifications').createIndex({ notified: 1 });
+      await client.db().collection('security_notifications').createIndex({ 'event._id': 1 });
+      
+      securityLogger.info("Created security metrics indexes");
+      return true;
+    } catch (error) {
+      securityLogger.error(`Error creating security metrics indexes: ${(error as Error).message}`);
+      return false;
     }
   }
 }

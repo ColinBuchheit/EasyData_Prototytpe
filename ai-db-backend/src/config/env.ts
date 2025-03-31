@@ -1,6 +1,5 @@
 // src/config/env.ts
 import path from "path";
-import logger from "./logger";
 import { createContextLogger } from "./logger";
 
 const envLogger = createContextLogger("Environment");
@@ -45,8 +44,43 @@ const getEnvVar = (key: string, defaultValue?: string, required = true): string 
   return value || defaultValue || "";
 };
 
+// Define the interface for our ENV object with optional fields
+interface EnvConfig {
+  NODE_ENV: string;
+  PORT: number;
+  JWT_SECRET: string;
+  JWT_EXPIRES_IN: string;
+  ENCRYPTION_KEY: string;
+  
+  DB_HOST: string;
+  DB_PORT: number;
+  DB_USER: string;
+  DB_PASSWORD: string;
+  DB_DATABASE: string;
+  DB_TYPE: string;
+  
+  REDIS_URL: string;
+  
+  AI_AGENT_API: string;
+  AI_API_KEY: string;
+  BACKEND_SECRET: string;
+  
+  CORS_ORIGIN: string;
+  RATE_LIMIT_WINDOW_MS: number;
+  RATE_LIMIT_MAX_REQUESTS: number;
+  
+  API_URL: string;
+  PROD_API_URL: string;
+  STAGING_API_URL: string;
+  
+  LOG_LEVEL: string;
+  LOG_FORMAT: string;
+  
+  MONGO_URI: string;
+}
+
 // Export ENV variables with Defaults
-export const ENV = {
+export const ENV: EnvConfig = {
   NODE_ENV: process.env.NODE_ENV || "development",
   PORT: Number(process.env.PORT) || 3000,
   JWT_SECRET: getEnvVar("JWT_SECRET", "dev-secret-key-change-in-production"),
@@ -90,11 +124,24 @@ export const ENV = {
 // Log the environment configuration in development
 if (ENV.NODE_ENV === 'development') {
   envLogger.info("Environment configuration loaded:");
-  const safeEnv = { ...ENV };
-  delete safeEnv.JWT_SECRET;
-  delete safeEnv.ENCRYPTION_KEY;
-  delete safeEnv.DB_PASSWORD;
-  delete safeEnv.AI_API_KEY;
-  delete safeEnv.BACKEND_SECRET;
+  
+  // Instead of using delete, create a new object with only the keys we want to log
+  const safeEnv = {
+    NODE_ENV: ENV.NODE_ENV,
+    PORT: ENV.PORT,
+    DB_HOST: ENV.DB_HOST,
+    DB_PORT: ENV.DB_PORT,
+    DB_USER: ENV.DB_USER,
+    DB_DATABASE: ENV.DB_DATABASE,
+    DB_TYPE: ENV.DB_TYPE,
+    REDIS_URL: ENV.REDIS_URL,
+    AI_AGENT_API: ENV.AI_AGENT_API,
+    CORS_ORIGIN: ENV.CORS_ORIGIN,
+    API_URL: ENV.API_URL,
+    LOG_LEVEL: ENV.LOG_LEVEL,
+    LOG_FORMAT: ENV.LOG_FORMAT,
+    MONGO_URI: ENV.MONGO_URI
+  };
+  
   console.log(safeEnv);
 }

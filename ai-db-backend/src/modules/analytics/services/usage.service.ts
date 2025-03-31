@@ -19,7 +19,7 @@ export class UsageService {
       resourceType?: string; 
       [key: string]: any; 
     }
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       const client = await getMongoClient();
       
@@ -29,13 +29,14 @@ export class UsageService {
         timestamp: new Date(),
         resourceId: details?.resourceId,
         resourceType: details?.resourceType,
-        details: details
+        details
       };
       
       await client.db().collection('usage_metrics').insertOne(metric);
+      return true;
     } catch (error) {
       usageLogger.error(`Error tracking user action: ${(error as Error).message}`);
-      // Non-blocking operation, so just log the error
+      return false;
     }
   }
 
@@ -116,9 +117,14 @@ export class UsageService {
   }
 
   /**
-   * Get queries per user
+   * Get queries per user with pagination
    */
-  static async getQueriesPerUser(limit = 10, startDate?: Date, endDate?: Date): Promise<{ userId: number; queryCount: number }[]> {
+  static async getQueriesPerUser(
+    limit = 10, 
+    startDate?: Date, 
+    endDate?: Date,
+    page = 1
+  ): Promise<{ userId: number; queryCount: number }[]> {
     try {
       const client = await getMongoClient();
       const matchStage: any = {
@@ -130,6 +136,8 @@ export class UsageService {
         if (startDate) matchStage.timestamp.$gte = startDate;
         if (endDate) matchStage.timestamp.$lte = endDate;
       }
+      
+      const skip = (page - 1) * limit;
       
       const result = await client.db().collection('usage_metrics')
         .aggregate([
@@ -153,12 +161,15 @@ export class UsageService {
             $sort: { queryCount: -1 }
           },
           {
+            $skip: skip
+          },
+          {
             $limit: limit
           }
         ])
         .toArray();
       
-      return result;
+      return result as unknown as { userId: number; queryCount: number }[];
     } catch (error) {
       usageLogger.error(`Error getting queries per user: ${(error as Error).message}`);
       return [];
@@ -168,7 +179,12 @@ export class UsageService {
   /**
    * Get most used databases
    */
-  static async getMostUsedDatabases(limit = 10, startDate?: Date, endDate?: Date): Promise<{ dbId: number; name: string; count: number }[]> {
+  static async getMostUsedDatabases(
+    limit = 10, 
+    startDate?: Date, 
+    endDate?: Date,
+    page = 1
+  ): Promise<{ dbId: number; name: string; count: number; userId?: number }[]> {
     try {
       const client = await getMongoClient();
       const matchStage: any = {
@@ -182,6 +198,8 @@ export class UsageService {
         if (endDate) matchStage.timestamp.$lte = endDate;
       }
       
+      const skip = (page - 1) * limit;
+      
       const result = await client.db().collection('usage_metrics')
         .aggregate([
           {
@@ -191,7 +209,8 @@ export class UsageService {
             $group: {
               _id: "$details.dbId",
               count: { $sum: 1 },
-              name: { $first: "$details.dbName" }
+              name: { $first: "$details.dbName" },
+              userId: { $first: "$userId" }
             }
           },
           {
@@ -199,6 +218,7 @@ export class UsageService {
               dbId: "$_id",
               name: 1,
               count: 1,
+              userId: 1,
               _id: 0
             }
           },
@@ -206,12 +226,15 @@ export class UsageService {
             $sort: { count: -1 }
           },
           {
+            $skip: skip
+          },
+          {
             $limit: limit
           }
         ])
         .toArray();
       
-      return result;
+      return result as unknown as { dbId: number; name: string; count: number; userId?: number }[];
     } catch (error) {
       usageLogger.error(`Error getting most used databases: ${(error as Error).message}`);
       return [];
@@ -219,19 +242,10 @@ export class UsageService {
   }
 
   /**
-   * Get usage report
+   * Get query types distribution
    */
-  static async getUsageReport(startDate?: Date, endDate?: Date): Promise<UsageReport> {
+  static async getQueryTypeDistribution(startDate?: Date, endDate?: Date): Promise<{ type: string; count: number }[]> {
     try {
-      const [activeUsersDaily, activeUsersWeekly, activeUsersMonthly, totalQueries, queriesPerUser, mostUsedDatabases] = await Promise.all([
-        this.getActiveUsers('daily'),
-        this.getActiveUsers('weekly'),
-        this.getActiveUsers('monthly'),
-        this.getTotalQueries(startDate, endDate),
-        this.getQueriesPerUser(10, startDate, endDate),
-        this.getMostUsedDatabases(10, startDate, endDate)
-      ]);
-      
       const client = await getMongoClient();
       const matchStage: any = {
         action: { $in: ['execute_query', 'ai_query', 'multi_db_query'] }
@@ -243,7 +257,7 @@ export class UsageService {
         if (endDate) matchStage.timestamp.$lte = endDate;
       }
       
-      const queryTypes = await client.db().collection('usage_metrics')
+      const result = await client.db().collection('usage_metrics')
         .aggregate([
           {
             $match: matchStage
@@ -260,9 +274,42 @@ export class UsageService {
               count: 1,
               _id: 0
             }
+          },
+          {
+            $sort: { count: -1 }
           }
         ])
         .toArray();
+      
+      return result as unknown as { type: string; count: number }[];
+    } catch (error) {
+      usageLogger.error(`Error getting query type distribution: ${(error as Error).message}`);
+      return [];
+    }
+  }
+
+  /**
+   * Get usage report
+   */
+  static async getUsageReport(startDate?: Date, endDate?: Date): Promise<UsageReport> {
+    try {
+      const [
+        activeUsersDaily,
+        activeUsersWeekly,
+        activeUsersMonthly,
+        totalQueries,
+        queriesPerUser,
+        mostUsedDatabases,
+        queryTypes
+      ] = await Promise.all([
+        this.getActiveUsers('daily'),
+        this.getActiveUsers('weekly'),
+        this.getActiveUsers('monthly'),
+        this.getTotalQueries(startDate, endDate),
+        this.getQueriesPerUser(10, startDate, endDate),
+        this.getMostUsedDatabases(10, startDate, endDate),
+        this.getQueryTypeDistribution(startDate, endDate)
+      ]);
       
       return {
         activeUsers: {
@@ -273,7 +320,8 @@ export class UsageService {
         totalQueries,
         queriesPerUser,
         mostUsedDatabases,
-        queryTypes
+        queryTypes,
+        generatedAt: new Date()
       };
     } catch (error) {
       usageLogger.error(`Error generating usage report: ${(error as Error).message}`);
@@ -288,8 +336,34 @@ export class UsageService {
         totalQueries: 0,
         queriesPerUser: [],
         mostUsedDatabases: [],
-        queryTypes: []
+        queryTypes: [],
+        generatedAt: new Date()
       };
+    }
+  }
+
+  /**
+   * Create necessary indexes for usage metrics
+   */
+  static async ensureIndexes(): Promise<boolean> {
+    try {
+      const client = await getMongoClient();
+      
+      // Create indexes for common query patterns
+      await client.db().collection('usage_metrics').createIndex({ userId: 1 });
+      await client.db().collection('usage_metrics').createIndex({ timestamp: 1 });
+      await client.db().collection('usage_metrics').createIndex({ action: 1 });
+      await client.db().collection('usage_metrics').createIndex({ 'details.dbId': 1 });
+      
+      // Compound indexes for common queries
+      await client.db().collection('usage_metrics').createIndex({ userId: 1, timestamp: 1 });
+      await client.db().collection('usage_metrics').createIndex({ action: 1, timestamp: 1 });
+      
+      usageLogger.info("Created usage metrics indexes");
+      return true;
+    } catch (error) {
+      usageLogger.error(`Error creating usage metrics indexes: ${(error as Error).message}`);
+      return false;
     }
   }
 }

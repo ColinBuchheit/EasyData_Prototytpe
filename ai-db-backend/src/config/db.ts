@@ -1,7 +1,6 @@
 // src/config/db.ts
 import { Pool } from "pg";
 import { ENV } from "./env";
-import logger from "./logger";
 import { createContextLogger } from "./logger";
 import { MongoClient } from "mongodb";
 import { connectWithRetry } from "../shared/utils/connectionHelpers";

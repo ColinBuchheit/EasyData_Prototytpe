@@ -2,11 +2,22 @@
 
 import { getMongoClient } from "../../../config/db";
 import { createContextLogger } from "../../../config/logger";
-import { DataPoint, TimeInterval, Trend, TrendComparison, TrendFilter } from "../models/trend.model";
+import { DataPoint, TimeInterval, Trend, TrendComparison, TrendFilter, TrendImpl } from "../models/trend.model";
 
 const trendLogger = createContextLogger("TrendAnalytics");
 
 export class TrendService {
+  /**
+   * Trend cache for frequently requested data
+   * Map key format: metricName:interval:userId:startDate:endDate
+   */
+  private static trendCache: Map<string, {data: Trend, timestamp: Date}> = new Map();
+  
+  /**
+   * Cache TTL in milliseconds (default: 5 minutes)
+   */
+  private static CACHE_TTL = 5 * 60 * 1000;
+
   /**
    * Get trend data for a metric
    */
@@ -40,6 +51,14 @@ export class TrendService {
             startDateValue.setFullYear(startDateValue.getFullYear() - 5); // Last 5 years
             break;
         }
+      }
+      
+      // Check cache first
+      const cacheKey = this.generateCacheKey(metricName, interval, userId, dbId, startDateValue, endDateValue);
+      const cachedTrend = this.getFromCache(cacheKey);
+      if (cachedTrend) {
+        trendLogger.debug(`Returning cached trend for ${cacheKey}`);
+        return cachedTrend;
       }
       
       const client = await getMongoClient();
@@ -88,6 +107,9 @@ export class TrendService {
         case 'activeUsers':
           groupStage.value = { $addToSet: "$userId" };
           break;
+        case 'securityEvents':
+          groupStage.value = { $sum: 1 };
+          break;
         default:
           groupStage.value = { $sum: 1 };
       }
@@ -110,16 +132,25 @@ export class TrendService {
         .aggregate(pipeline)
         .toArray();
       
-      return {
+      // Convert to proper DataPoint objects
+      const formattedDataPoints: DataPoint[] = dataPoints.map(dp => ({
+        timestamp: this.parseTimestamp(dp.timestamp, interval),
+        value: dp.value
+      }));
+      
+      // Create the trend using the TrendImpl class
+      const trend = new TrendImpl({
         metricName,
         interval,
-        dataPoints: dataPoints.map(dp => ({
-          timestamp: this.parseTimestamp(dp.timestamp, interval),
-          value: dp.value
-        })),
+        dataPoints: formattedDataPoints,
         startDate: startDateValue,
         endDate: endDateValue
-      };
+      });
+      
+      // Save to cache
+      this.addToCache(cacheKey, trend);
+      
+      return trend;
     } catch (error) {
       trendLogger.error(`Error getting trend data: ${(error as Error).message}`);
       return null;
@@ -170,28 +201,43 @@ export class TrendService {
         return null;
       }
       
-      // Calculate total values for both periods
-      const currentTotal = currentTrend.dataPoints.reduce((sum, dp) => sum + dp.value, 0);
-      const previousTotal = previousTrend.dataPoints.reduce((sum, dp) => sum + dp.value, 0);
-      
-      // Calculate percent change
-      let percentChange = 0;
-      if (previousTotal !== 0) {
-        percentChange = ((currentTotal - previousTotal) / previousTotal) * 100;
-      } else if (currentTotal !== 0) {
-        percentChange = 100; // If previous was 0 and current is not, that's 100% increase
-      }
-      
+      // Use the utility function to create the comparison
       return {
         name: metricName,
         currentPeriod: currentTrend,
         previousPeriod: previousTrend,
-        percentChange
+        percentChange: this.calculatePercentChange(currentTrend, previousTrend),
+        absoluteChange: this.calculateAbsoluteChange(currentTrend, previousTrend),
+        isPositiveTrend: this.calculateAbsoluteChange(currentTrend, previousTrend) > 0
       };
     } catch (error) {
       trendLogger.error(`Error comparing trends: ${(error as Error).message}`);
       return null;
     }
+  }
+
+  /**
+   * Calculate the percentage change between two trends
+   */
+  private static calculatePercentChange(current: Trend, previous: Trend): number {
+    const currentTotal = current.dataPoints.reduce((sum, point) => sum + point.value, 0);
+    const previousTotal = previous.dataPoints.reduce((sum, point) => sum + point.value, 0);
+    
+    if (previousTotal === 0) {
+      return currentTotal === 0 ? 0 : 100;
+    }
+    
+    return ((currentTotal - previousTotal) / previousTotal) * 100;
+  }
+
+  /**
+   * Calculate the absolute change between two trends
+   */
+  private static calculateAbsoluteChange(current: Trend, previous: Trend): number {
+    const currentTotal = current.dataPoints.reduce((sum, point) => sum + point.value, 0);
+    const previousTotal = previous.dataPoints.reduce((sum, point) => sum + point.value, 0);
+    
+    return currentTotal - previousTotal;
   }
 
   /**
@@ -290,6 +336,133 @@ export class TrendService {
     }
     
     return date;
+  }
+
+  /**
+   * Generate a cache key for trend data
+   */
+  private static generateCacheKey(
+    metricName: string,
+    interval: TimeInterval,
+    userId?: number,
+    dbId?: number,
+    startDate?: Date,
+    endDate?: Date
+  ): string {
+    const userPart = userId ? userId.toString() : 'all';
+    const dbPart = dbId ? dbId.toString() : 'all';
+    const startPart = startDate ? startDate.getTime().toString() : 'default';
+    const endPart = endDate ? endDate.getTime().toString() : 'default';
+    
+    return `${metricName}:${interval}:${userPart}:${dbPart}:${startPart}:${endPart}`;
+  }
+
+  /**
+   * Add trend data to cache
+   */
+  private static addToCache(key: string, trend: Trend): void {
+    this.trendCache.set(key, {
+      data: trend,
+      timestamp: new Date()
+    });
+    
+    // Clean up old cache entries if cache is getting too large
+    if (this.trendCache.size > 100) {
+      this.cleanExpiredCache();
+    }
+  }
+
+  /**
+   * Get trend data from cache
+   */
+  private static getFromCache(key: string): Trend | null {
+    const cachedItem = this.trendCache.get(key);
+    
+    if (!cachedItem) {
+      return null;
+    }
+    
+    // Check if cache is still valid
+    if (Date.now() - cachedItem.timestamp.getTime() > this.CACHE_TTL) {
+      this.trendCache.delete(key);
+      return null;
+    }
+    
+    return cachedItem.data;
+  }
+
+  /**
+   * Clean expired cache entries
+   */
+  private static cleanExpiredCache(): void {
+    const now = Date.now();
+    let cleanedCount = 0;
+    
+    for (const [key, item] of this.trendCache.entries()) {
+      if (now - item.timestamp.getTime() > this.CACHE_TTL) {
+        this.trendCache.delete(key);
+        cleanedCount++;
+      }
+    }
+    
+    if (cleanedCount > 0) {
+      trendLogger.debug(`Cleaned ${cleanedCount} expired trend cache entries`);
+    }
+  }
+
+  /**
+   * Clear the entire trend cache
+   */
+  static clearCache(): void {
+    const count = this.trendCache.size;
+    this.trendCache.clear();
+    trendLogger.info(`Cleared ${count} entries from trend cache`);
+  }
+  
+  /**
+   * Set a custom cache TTL (in milliseconds)
+   */
+  static setCacheTTL(ttlMs: number): void {
+    if (ttlMs < 0) {
+      trendLogger.warn("Cannot set negative cache TTL, ignoring");
+      return;
+    }
+    
+    this.CACHE_TTL = ttlMs;
+    trendLogger.info(`Set trend cache TTL to ${ttlMs}ms`);
+  }
+
+  /**
+   * Create necessary indexes for trend data collections
+   */
+  static async ensureIndexes(): Promise<boolean> {
+    try {
+      const client = await getMongoClient();
+      
+      // We need to ensure indexes on the collections used by trend analysis
+      // These are the same collections used by the other services
+      
+      // For usage_metrics
+      await client.db().collection('usage_metrics').createIndex({ timestamp: 1 });
+      await client.db().collection('usage_metrics').createIndex({ userId: 1, timestamp: 1 });
+      
+      // For performance_metrics
+      await client.db().collection('performance_metrics').createIndex({ timestamp: 1 });
+      await client.db().collection('performance_metrics').createIndex({ userId: 1, timestamp: 1 });
+      await client.db().collection('performance_metrics').createIndex({ dbId: 1, timestamp: 1 });
+      
+      // For security_metrics
+      await client.db().collection('security_metrics').createIndex({ timestamp: 1 });
+      
+      // For error_metrics
+      await client.db().collection('error_metrics').createIndex({ timestamp: 1 });
+      
+      trendLogger.info("Created trend data indexes");
+      return true;
+    } catch (error) {
+      trendLogger.error(`Error creating trend data indexes: ${(error as Error).message}`);
+      return false;
+    }
   }
 }
 

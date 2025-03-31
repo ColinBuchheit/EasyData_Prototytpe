@@ -1,8 +1,8 @@
 // src/modules/analytics/routes.ts
 
 import { Router } from "express";
-import { verifyTokenMiddleware } from "../../auth/middleware/verification.middleware";
-import { requireRole } from "../../auth/middleware/rbac.middleware";
+import { verifyTokenMiddleware } from "../auth/middleware/verification.middleware";
+import { requireRole } from "../auth/middleware/rbac.middleware";
 
 // Import controllers
 import {
@@ -38,7 +38,7 @@ import {
   getAdminDashboard,
   getUserDashboard,
   compareMetrics
-} from "./controllers/dashboard.controller";
+} from "./controllers/dashbaord.controller";
 
 const router = Router();
 
