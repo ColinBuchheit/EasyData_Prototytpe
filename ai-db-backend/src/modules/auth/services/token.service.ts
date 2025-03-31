@@ -15,6 +15,13 @@ export const generateToken = (userId: number, role: string): string => {
 };
 
 /**
+ * Generate refresh token with longer lifetime
+ */
+export const generateRefreshToken = (userId: number, role: string): string => {
+  return jwt.sign({ userId, role, type: "refresh" }, ENV.JWT_SECRET, { expiresIn: "7d" });
+};
+
+/**
  * Refresh a JWT token
  */
 export const refreshToken = async (oldToken: string): Promise<string | null> => {
@@ -28,6 +35,13 @@ export const refreshToken = async (oldToken: string): Promise<string | null> => 
     }
 
     const decoded = jwt.verify(oldToken, ENV.JWT_SECRET) as TokenPayload;
+    
+    // Check if it's a refresh token
+    if (decoded.type !== "refresh") {
+      tokenLogger.warn("Attempted to use a non-refresh token for refresh.");
+      return null;
+    }
+    
     return generateToken(decoded.userId, decoded.role);
   } catch (error) {
     tokenLogger.warn(`Failed to refresh token: ${(error as Error).message}`);
@@ -44,6 +58,12 @@ export const verifyToken = (token: string): TokenPayload | { error: string; expi
   } catch (error) {
     if (error instanceof jwt.TokenExpiredError) {
       return { error: "Token expired", expired: true };
+    }
+    if (error instanceof jwt.JsonWebTokenError) {
+      return { error: "Invalid token signature" };
+    }
+    if (error instanceof jwt.NotBeforeError) {
+      return { error: "Token not yet valid" };
     }
     return { error: "Invalid token" };
   }
@@ -65,6 +85,11 @@ export const blacklistToken = async (token: string): Promise<boolean> => {
     const now = Math.floor(Date.now() / 1000);
     const ttl = (decoded.exp || now + 3600) - now;
     
+    if (ttl <= 0) {
+      // Token already expired, no need to blacklist
+      return true;
+    }
+    
     await redisClient.set(`blacklist:${token}`, "true", "EX", ttl);
     return true;
   } catch (error) {
@@ -77,7 +102,7 @@ export const blacklistToken = async (token: string): Promise<boolean> => {
  * Generate a password reset token
  */
 export const generateResetToken = (userId: number): string => {
-  return jwt.sign({ userId }, ENV.JWT_SECRET, { expiresIn: "15m" });
+  return jwt.sign({ userId, type: "reset" }, ENV.JWT_SECRET, { expiresIn: "15m" });
 };
 
 /**
@@ -85,9 +110,18 @@ export const generateResetToken = (userId: number): string => {
  */
 export const validateResetToken = (token: string): { userId: number } | { error: string } => {
   try {
-    const decoded = jwt.verify(token, ENV.JWT_SECRET) as { userId: number };
-    return decoded;
+    const decoded = jwt.verify(token, ENV.JWT_SECRET) as any;
+    
+    // Verify it's a reset token
+    if (decoded.type !== "reset") {
+      return { error: "Invalid token type" };
+    }
+    
+    return { userId: decoded.userId };
   } catch (error) {
+    if (error instanceof jwt.TokenExpiredError) {
+      return { error: "Reset token has expired" };
+    }
     return { error: "Invalid or expired reset token" };
   }
 };

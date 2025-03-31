@@ -3,6 +3,7 @@ import { Request, Response, NextFunction } from "express";
 import { createContextLogger } from "../../../config/logger";
 import { TokenPayload } from "../models/auth.model";
 import { verifyToken } from "../services/token.service";
+import { getRedisClient } from "../../../config/redis";
 
 const authLogger = createContextLogger("AuthMiddleware");
 
@@ -16,7 +17,7 @@ export interface AuthRequest extends Request {
 /**
  * Middleware to verify JWT token for authenticated routes
  */
-export const verifyTokenMiddleware = (req: AuthRequest, res: Response, next: NextFunction): void => {
+export const verifyTokenMiddleware = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
     let authHeader = req.headers["authorization"];
 
@@ -31,13 +32,33 @@ export const verifyTokenMiddleware = (req: AuthRequest, res: Response, next: Nex
     }
 
     const token = authHeader.split(" ")[1] as string;
+    
+    // Check if token is blacklisted
+    try {
+      const redisClient = await getRedisClient();
+      const isBlacklisted = await redisClient.get(`blacklist:${token}`);
+      
+      if (isBlacklisted) {
+        authLogger.warn("Attempted use of blacklisted token");
+        res.status(401).json({ 
+          success: false, 
+          message: "Token has been revoked. Please log in again." 
+        });
+        return;
+      }
+    } catch (redisError) {
+      // If Redis check fails, log but continue - better to allow a potentially
+      // valid token than to block all requests if Redis is down
+      authLogger.error(`Redis blacklist check failed: ${(redisError as Error).message}`);
+    }
+    
     const decoded = verifyToken(token);
 
     if ("error" in decoded) {
       if (decoded.expired) {
         res.status(401).json({ 
           success: false,
-          message: "Token expired, please log in again.",
+          message: "Token expired. Please log in again or use refresh token.",
           tokenExpired: true
         });
       } else {
@@ -57,12 +78,26 @@ export const verifyTokenMiddleware = (req: AuthRequest, res: Response, next: Nex
 /**
  * Verify WebSocket token and return user ID if valid
  */
-export const verifyWebSocketToken = (token: string): number | null => {
-  const decoded = verifyToken(token);
-  if ("error" in decoded) {
+export const verifyWebSocketToken = async (token: string): Promise<number | null> => {
+  try {
+    // Check if token is blacklisted
+    const redisClient = await getRedisClient();
+    const isBlacklisted = await redisClient.get(`blacklist:${token}`);
+    
+    if (isBlacklisted) {
+      authLogger.warn("Attempted use of blacklisted token for WebSocket");
+      return null;
+    }
+    
+    const decoded = verifyToken(token);
+    if ("error" in decoded) {
+      return null;
+    }
+    return decoded.userId;
+  } catch (error) {
+    authLogger.error(`WebSocket token verification error: ${(error as Error).message}`);
     return null;
   }
-  return decoded.userId;
 };
 
 /**

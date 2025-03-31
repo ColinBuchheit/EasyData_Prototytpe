@@ -77,6 +77,17 @@ interface EnvConfig {
   LOG_FORMAT: string;
   
   MONGO_URI: string;
+  
+  // Email and SMTP Configuration
+  SMTP_HOST: string;
+  SMTP_PORT: number;
+  SMTP_SECURE: boolean;
+  SMTP_USER: string;
+  SMTP_PASSWORD: string;
+  DEV_EMAIL_USER: string;
+  DEV_EMAIL_PASS: string;
+  EMAIL_FROM: string;
+  FRONTEND_URL: string;
 }
 
 // Export ENV variables with Defaults
@@ -112,6 +123,7 @@ export const ENV: EnvConfig = {
   API_URL: getEnvVar("API_URL", "http://localhost:3000", false),
   PROD_API_URL: getEnvVar("PROD_API_URL", "https://api.easydata.com", false),
   STAGING_API_URL: getEnvVar("STAGING_API_URL", "https://staging-api.easydata.com", false),
+  FRONTEND_URL: getEnvVar("FRONTEND_URL", "http://localhost:3000", false),
   
   // Logging
   LOG_LEVEL: getEnvVar("LOG_LEVEL", "info", false),
@@ -119,6 +131,16 @@ export const ENV: EnvConfig = {
   
   // MongoDB
   MONGO_URI: getEnvVar("MONGO_URI", "mongodb://localhost:27017/easydata", false),
+  
+  // Email and SMTP Configuration
+  SMTP_HOST: getEnvVar("SMTP_HOST", "smtp.example.com", false),
+  SMTP_PORT: Number(process.env.SMTP_PORT) || 587,
+  SMTP_SECURE: process.env.SMTP_SECURE === "true",
+  SMTP_USER: getEnvVar("SMTP_USER", "", false),
+  SMTP_PASSWORD: getEnvVar("SMTP_PASSWORD", "", false),
+  DEV_EMAIL_USER: getEnvVar("DEV_EMAIL_USER", "", false),
+  DEV_EMAIL_PASS: getEnvVar("DEV_EMAIL_PASS", "", false),
+  EMAIL_FROM: getEnvVar("EMAIL_FROM", '"EasyData Support" <support@easydata.com>', false),
 };
 
 // Log the environment configuration in development

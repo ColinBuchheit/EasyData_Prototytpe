@@ -3,7 +3,9 @@
 import { pool } from "../../../config/db";
 import { createContextLogger } from "../../../config/logger";
 import { AuthService } from "../../auth/services/auth.service";
-import { User, UserCreationData, UserListOptions, UserRole, UserStatus, UserUpdateData, UserWithAuth } from "../models/user.model";
+import { User, UserCreationData, UserListOptions, UserRole, UserStatus, UserUpdateData, UserWithAuth } from "../model/user.model";
+import { hashPassword, comparePassword } from "../../auth/services/password.service";
+
 
 const userLogger = createContextLogger("UserService");
 
@@ -168,7 +170,7 @@ export class UserService {
       }
       
       // Hash password
-      const hashedPassword = await AuthService.hashPassword(userData.password);
+      const hashedPassword = await hashPassword(userData.password);
       
       // Set default role if not provided
       const role = userData.role || 'user';
@@ -280,10 +282,10 @@ export class UserService {
   /**
    * Update user's password
    */
-  static async updatePassword(userId: number, newPassword: string): Promise<boolean> {
+  static async updatePassword(userId: number, newPassword: string, hashedPassword: string, p0: boolean): Promise<boolean> {
     try {
       // Hash new password
-      const hashedPassword = await AuthService.hashPassword(newPassword);
+      const hashedPassword = await hashPassword(newPassword);
       
       // Update password
       const result = await pool.query(
@@ -340,7 +342,8 @@ export class UserService {
       );
       
       userLogger.info(`Deleted user ${userId}`);
-      return result.rowCount > 0;
+      return (result.rowCount ?? 0) > 0;
+
     } catch (error) {
       userLogger.error(`Error deleting user ${userId}: ${(error as Error).message}`);
       throw error;
@@ -412,7 +415,8 @@ export class UserService {
       }
       
       // Verify password
-      const isValid = await AuthService.comparePassword(password, user.password_hash);
+      const isValid = await comparePassword(password, user.password_hash);
+
       
       if (!isValid) {
         return null;
