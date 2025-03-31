@@ -6,7 +6,7 @@ import { getMongoClient } from "../../../config/db";
 import axios from "axios";
 import { ConnectionsService } from "./connections.service";
 import { DatabaseMetadata, SchemaValidationResult } from "../models/schema.model";
-import { DatabaseType } from "../models/database-types.model";
+import { DatabaseType } from "../models/database.types.model";
 
 const schemaLogger = createContextLogger("SchemaService");
 

@@ -1,7 +1,7 @@
 // src/services/userdbClients/postgresClient.ts
 import { IDatabaseClient } from "./interfaces";
-import { UserDatabase } from "../../../../models/userDatabase.model";
-import { Client } from "pg";
+import { UserDatabase } from "../../models/connection.model";
+import { Client, Pool } from "pg"; // Import Pool as well
 import logger from "../../../../config/logger";
 import { connectWithRetry } from "../../../../shared/utils/connectionHelpers";
 import { connectionCache, getConnectionKey } from "./adapter";
@@ -95,6 +95,54 @@ export const postgresClient: IDatabaseClient = {
       } catch (error) {
         logger.error(`❌ Error disconnecting from PostgreSQL: ${(error as Error).message}`);
       }
+    }
+  },
+
+  // Add transaction support methods
+  async beginTransaction(db: UserDatabase): Promise<any> {
+    const client = await this.connect(db);
+    await client.query('BEGIN');
+    return client;
+  },
+
+  async executeInTransaction(transaction: any, query: string): Promise<any> {
+    try {
+      const result = await transaction.query(query);
+      return result.rows;
+    } catch (error) {
+      logger.error(`❌ Error executing query in transaction: ${(error as Error).message}`);
+      throw error; // Don't wrap the error so rollback can be triggered
+    }
+  },
+
+  async commitTransaction(transaction: any): Promise<void> {
+    try {
+      await transaction.query('COMMIT');
+    } catch (error) {
+      logger.error(`❌ Error committing transaction: ${(error as Error).message}`);
+      throw error;
+    }
+  },
+
+  async rollbackTransaction(transaction: any): Promise<void> {
+    try {
+      await transaction.query('ROLLBACK');
+    } catch (error) {
+      logger.error(`❌ Error rolling back transaction: ${(error as Error).message}`);
+      // We don't throw here as this is already error handling
+    }
+  },
+
+  async testConnection(db: UserDatabase): Promise<boolean> {
+    try {
+      const client = new Client(getConfig(db));
+      await client.connect();
+      await client.query('SELECT 1');
+      await client.end();
+      return true;
+    } catch (error) {
+      logger.error(`❌ Connection test failed: ${(error as Error).message}`);
+      return false;
     }
   }
 };

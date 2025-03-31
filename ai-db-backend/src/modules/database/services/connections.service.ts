@@ -5,7 +5,7 @@ import { createContextLogger } from "../../../config/logger";
 import { DatabaseConnectionConfig, UserDatabase } from "../models/connection.model";
 import { getClientForDB } from "./clients";
 import { encrypt } from "../../../shared/utils/encryption";
-import { DatabaseType } from "../models/database-types.model";
+import { DatabaseType } from "../models/database.types.model";
 
 const connectionsLogger = createContextLogger("ConnectionsService");
 
@@ -18,7 +18,6 @@ export class ConnectionsService {
    */
   static async createConnection(userId: number, config: DatabaseConnectionConfig): Promise<UserDatabase> {
     try {
-      // Encrypt the password
       const encryptedPassword = encrypt(config.password);
       
       const result = await pool.query(
@@ -42,8 +41,8 @@ export class ConnectionsService {
       connectionsLogger.info(`New database connection added for User ${userId}`);
       return result.rows[0];
     } catch (error) {
-      connectionsLogger.error(`Error creating database connection: ${(error as Error).message}`);
-      throw new Error(`Failed to create database connection: ${(error as Error).message}`);
+      connectionsLogger.error(`Failed to encrypt database password: ${(error as Error).message}`);
+      throw new Error("Failed to securely store database credentials");
     }
   }
 
@@ -81,6 +80,51 @@ export class ConnectionsService {
     } catch (error) {
       connectionsLogger.error(`Error fetching database connection ID ${dbId}: ${(error as Error).message}`);
       throw new Error("Failed to fetch database connection.");
+    }
+  }
+
+  // Add new method for transactions
+  static async executeTransactionQueries(
+    db: UserDatabase, 
+    queries: string[]
+  ): Promise<any[]> {
+    try {
+      const client = getClientForDB(db.db_type as DatabaseType);
+      
+      // Check if this client has transaction support
+      if (!client.beginTransaction || !client.commitTransaction || !client.rollbackTransaction || !client.executeInTransaction) {
+        // Fall back to individual queries if transactions aren't supported
+        connectionsLogger.warn(`Transactions not supported for ${db.db_type} database. Executing queries individually.`);
+        
+        const results = [];
+        for (const query of queries) {
+          const result = await client.runQuery(db, query);
+          results.push(result);
+        }
+        return results;
+      }
+      
+      // Execute transaction
+      const transaction = await client.beginTransaction(db);
+      
+      try {
+        const results = [];
+        for (const query of queries) {
+          const result = await client.executeInTransaction(transaction, query);
+          results.push(result);
+        }
+        
+        await client.commitTransaction(transaction);
+        return results;
+      } catch (error) {
+        if (client.rollbackTransaction) {
+          await client.rollbackTransaction(transaction);
+        }
+        throw error;
+      }
+    } catch (error) {
+      connectionsLogger.error(`Transaction execution failed: ${(error as Error).message}`);
+      throw new Error(`Transaction failed: ${(error as Error).message}`);
     }
   }
 
@@ -151,23 +195,24 @@ export class ConnectionsService {
    * Delete a database connection
    */
 static async deleteConnection(userId: number, dbId: number): Promise<boolean> {
-    try {
-      const result = await pool.query(
-        "DELETE FROM user_databases WHERE id = $1 AND user_id = $2 RETURNING id",
-        [dbId, userId]
-      );
-      
-      const deleted = result.rowCount > 0;
-      if (deleted) {
-        connectionsLogger.info(`Database connection ID ${dbId} deleted for User ${userId}`);
-      }
-      
-      return deleted;
-    } catch (error) {
-      connectionsLogger.error(`Error deleting database connection ID ${dbId}: ${(error as Error).message}`);
-      throw new Error("Failed to delete database connection.");
+  try {
+    const result = await pool.query(
+      "DELETE FROM user_databases WHERE id = $1 AND user_id = $2 RETURNING id",
+      [dbId, userId]
+    );
+    
+    // Fix for TypeScript error: handle potential null value
+    const deleted = (result.rowCount ?? 0) > 0;
+    if (deleted) {
+      connectionsLogger.info(`Database connection ID ${dbId} deleted for User ${userId}`);
     }
+    
+    return deleted;
+  } catch (error) {
+    connectionsLogger.error(`Error deleting database connection ID ${dbId}: ${(error as Error).message}`);
+    throw new Error("Failed to delete database connection.");
   }
+}
 
   /**
    * Test a database connection

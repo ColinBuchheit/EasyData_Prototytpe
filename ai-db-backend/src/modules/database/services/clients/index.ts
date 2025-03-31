@@ -11,7 +11,7 @@ import { couchdbClient } from "./couchdbClient";
 import { dynamodbClient } from "./dynamodbClient";
 import { createContextLogger } from "../../../../config/logger";
 import { UserDatabase } from "../../models/connection.model";
-import { DatabaseType } from "../../models/database-types.model";
+import { DatabaseType } from "../../models/database.types.model";
 
 const dbLogger = createContextLogger("DatabaseClients");
 

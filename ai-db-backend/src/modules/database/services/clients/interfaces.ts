@@ -1,6 +1,6 @@
 // src/modules/database/services/clients/interfaces.ts
 
-import type { UserDatabase } from "../../models/connection.model";
+import { UserDatabase } from "../../models/connection.model";
 
 export interface IDatabaseClient {
   /**
@@ -32,4 +32,24 @@ export interface IDatabaseClient {
    * Closes connections and performs cleanup
    */
   disconnect(db: UserDatabase): Promise<void>;
+
+  /**
+   * Begins a database transaction
+   */
+  beginTransaction?(db: UserDatabase): Promise<any>;
+
+  /**
+   * Executes a query within an existing transaction
+   */
+  executeInTransaction?(transaction: any, query: string): Promise<any>;
+
+  /**
+   * Commits a database transaction
+   */
+  commitTransaction?(transaction: any): Promise<void>;
+
+  /**
+   * Rolls back a database transaction
+   */
+  rollbackTransaction?(transaction: any): Promise<void>;
 }

@@ -6,7 +6,7 @@ import { ConnectionsService } from "../services/connections.service";
 import { AuthRequest } from "../../../modules/auth/middleware/verification.middleware";
 import { asyncHandler } from "../../../shared/utils/errorHandler";
 import { createContextLogger } from "../../../config/logger";
-import { isValidDatabaseType } from "../models/database-types.model";
+import { isValidDatabaseType } from "../models/database.types.model";
 
 const schemaControllerLogger = createContextLogger("SchemaController");
 

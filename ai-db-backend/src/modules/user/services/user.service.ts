@@ -282,8 +282,34 @@ export class UserService {
   /**
    * Update user's password
    */
-  static async updatePassword(userId: number, newPassword: string, hashedPassword: string, p0: boolean): Promise<boolean> {
+  static async updatePassword(
+    userId: number, 
+    newPassword: string,
+    options: { 
+      currentPassword?: string;
+      isReset?: boolean;
+    } = {}
+  ): Promise<boolean> {
     try {
+      // If not a password reset, verify current password
+      if (!options.isReset && options.currentPassword) {
+        const user = await this.getUserById(userId);
+        if (!user) {
+          throw new Error(`User with ID ${userId} not found`);
+        }
+  
+        // Verify current password
+        const userWithAuth = await this.getUserByUsername(user.username);
+        if (!userWithAuth) {
+          throw new Error("User not found");
+        }
+  
+        const isValidPassword = await comparePassword(options.currentPassword, userWithAuth.password_hash);
+        if (!isValidPassword) {
+          return false;
+        }
+      }
+  
       // Hash new password
       const hashedPassword = await hashPassword(newPassword);
       

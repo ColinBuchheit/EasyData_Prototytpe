@@ -1,6 +1,6 @@
 // src/modules/query/models/query.model.ts
 
-import { DatabaseType } from "../../database/models/database-types.model";
+import { DatabaseType } from "../../database/models/database.types.model";
 
 export interface Query {
   id?: number;

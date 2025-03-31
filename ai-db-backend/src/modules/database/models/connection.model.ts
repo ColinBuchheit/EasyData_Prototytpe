@@ -1,6 +1,6 @@
 // src/modules/database/models/connection.model.ts
 
-import { DatabaseType } from "./database-types.model";
+import { DatabaseType } from "./database.types.model";
 
 export interface UserDatabase {
   id: number;

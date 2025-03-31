@@ -85,7 +85,7 @@ export class AuthService {
       
       // Calling updatePassword with the correct parameters based on the error messages
       // The method now expects 4 arguments: userId, currentPassword, newPassword, isReset
-      const success = await UserService.updatePassword(userId, "", hashedPassword, true);
+      const success = await UserService.updatePassword(userId, newPassword, { isReset: true });
       
       if (success) {
         // Clear any existing refresh tokens for this user
@@ -124,13 +124,12 @@ export class AuthService {
       if (!passwordCheck.valid) {
         return false;
       }
-
-      // Hash the new password
-      const hashedPassword = await hashPassword(newPassword);
-      
-      // Calling updatePassword with the correct parameters based on the error messages
-      // The last parameter should be false or omitted since this is not a reset
-      const success = await UserService.updatePassword(userId, currentPassword, hashedPassword, false);
+  
+      // Call updatePassword with the corrected parameter structure
+      const success = await UserService.updatePassword(userId, newPassword, {
+        currentPassword: currentPassword,
+        isReset: false
+      });
       
       if (success) {
         // Clear any existing refresh tokens for this user
