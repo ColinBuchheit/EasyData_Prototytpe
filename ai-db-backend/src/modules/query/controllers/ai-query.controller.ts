@@ -3,7 +3,7 @@
 import { Response } from "express";
 import * as ws from "ws";
 import { createContextLogger } from "../../../config/logger";
-import { AuthRequest } from "../../../modules/auth/middleware/verification.middleware";
+import { AuthRequest } from "../../auth/middleware/verification.middleware";
 import { asyncHandler } from "../../../shared/utils/errorHandler";
 import { AIAgentService } from "../services/ai-agent.service";
 import { ContextService } from "../services/context.service";

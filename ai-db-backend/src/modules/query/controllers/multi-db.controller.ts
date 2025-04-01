@@ -2,7 +2,7 @@
 
 import { Response } from "express";
 import { createContextLogger } from "../../../config/logger";
-import { AuthRequest } from "../../../modules/auth/middleware/verification.middleware";
+import { AuthRequest } from "../../auth/middleware/verification.middleware";
 import { asyncHandler } from "../../../shared/utils/errorHandler";
 import { MultiDbService } from "../services/multi-db.service";
 import { ConnectionsService } from "../../database/services/connections.service";

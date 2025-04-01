@@ -7,6 +7,10 @@ import axios from "axios";
 import { ConnectionsService } from "./connections.service";
 import { DatabaseMetadata, SchemaValidationResult } from "../models/schema.model";
 import { DatabaseType } from "../models/database.types.model";
+import { 
+  UnifiedSchema, 
+  convertToUnifiedSchema 
+} from "../models/unified-schema.model";
 
 const schemaLogger = createContextLogger("SchemaService");
 
@@ -155,22 +159,35 @@ export class SchemaService {
       
       // Create schema structure to analyze
       const schemaDetails = [];
+      const columnsMap: Record<string, any[]> = {};
+      
       for (const table of tables) {
         const columns = await ConnectionsService.fetchSchemaFromConnection(db, table);
         schemaDetails.push({
           table,
           columns
         });
+        columnsMap[table] = columns;
       }
       
+      // Convert to unified schema format
+      const unifiedSchema = convertToUnifiedSchema(
+        dbId,
+        db.database_name,
+        db.db_type,
+        tables,
+        columnsMap
+      );
+      
       // Ask AI to analyze the schema
-      const aiResponse = await axios.post("http://ai-agent-network:5001/run", {
+      const aiResponse = await axios.post(process.env.AI_AGENT_URL + "/run", {
         operation: "analyze_schema",
         userId,
         dbId,
         dbType: db.db_type,
         dbName: db.database_name,
-        schemaDetails
+        schemaDetails,
+        unifiedSchema
       });
       
       if (!aiResponse.data.success) {
@@ -260,6 +277,217 @@ export class SchemaService {
     } catch (error) {
       schemaLogger.error(`Error retrieving all database metadata: ${(error as Error).message}`);
       return [];
+    }
+  }
+  
+  /**
+   * Get database schema in unified format for shared use with AI agent
+   */
+  static async getUnifiedSchema(userId: number, dbId: number): Promise<UnifiedSchema | null> {
+    try {
+      // First check if we already have metadata
+      const metadata = await this.getDbMetadata(userId, dbId);
+      
+      // Get database connection
+      const db = await ConnectionsService.getConnectionById(userId, dbId);
+      if (!db) {
+        schemaLogger.error(`Database not found for user ${userId}, dbId ${dbId}`);
+        return null;
+      }
+      
+      // Get tables
+      const tables = await ConnectionsService.fetchTablesFromConnection(db);
+      if (!tables.length) {
+        schemaLogger.warn(`No tables found for database ${dbId}`);
+        return null;
+      }
+      
+      // Get schema for each table
+      const columnsMap: Record<string, any[]> = {};
+      for (const table of tables) {
+        try {
+          columnsMap[table] = await ConnectionsService.fetchSchemaFromConnection(db, table);
+        } catch (error) {
+          schemaLogger.warn(`Error fetching schema for table ${table}: ${(error as Error).message}`);
+          columnsMap[table] = [];
+        }
+      }
+      
+      // Convert to unified format
+      const unifiedSchema = convertToUnifiedSchema(
+        dbId,
+        db.database_name,
+        db.db_type,
+        tables,
+        columnsMap,
+        metadata
+      );
+      
+      return unifiedSchema;
+    } catch (error) {
+      schemaLogger.error(`Error generating unified schema: ${(error as Error).message}`);
+      return null;
+    }
+  }
+  
+  /**
+   * Get unified schemas for all databases of a user
+   */
+  static async getAllUnifiedSchemas(userId: number): Promise<UnifiedSchema[]> {
+    try {
+      // Get all user's databases
+      const connections = await ConnectionsService.getUserConnections(userId);
+      
+      // Get all metadata in one query for efficiency
+      const client = await getMongoClient();
+      const allMetadata = await client.db().collection('database_metadata')
+        .find({ userId })
+        .toArray();
+      
+      // Create a map for quick lookup
+      const metadataMap = new Map();
+      allMetadata.forEach(doc => {
+        metadataMap.set(doc.dbId, doc);
+      });
+      
+      // Get unified schema for each database
+      const schemas: UnifiedSchema[] = [];
+      
+      for (const connection of connections) {
+        try {
+          // Get metadata for this connection
+          const metadata = metadataMap.get(connection.id);
+          
+          // Get tables
+          const tables = await ConnectionsService.fetchTablesFromConnection(connection);
+          if (!tables.length) continue;
+          
+          // Get schema for each table
+          const columnsMap: Record<string, any[]> = {};
+          for (const table of tables) {
+            try {
+              columnsMap[table] = await ConnectionsService.fetchSchemaFromConnection(connection, table);
+            } catch (error) {
+              columnsMap[table] = [];
+            }
+          }
+          
+          // Convert to unified format
+          const unifiedSchema = convertToUnifiedSchema(
+            connection.id,
+            connection.database_name,
+            connection.db_type,
+            tables,
+            columnsMap,
+            metadata
+          );
+          
+          schemas.push(unifiedSchema);
+        } catch (error) {
+          schemaLogger.warn(`Skipping schema for database ${connection.id}: ${(error as Error).message}`);
+        }
+      }
+      
+      return schemas;
+    } catch (error) {
+      schemaLogger.error(`Error retrieving all unified schemas: ${(error as Error).message}`);
+      return [];
+    }
+  }
+  
+  /**
+   * Get database relationships (foreign keys)
+   * This is a helper method to enhance the unified schema
+   */
+  static async getDatabaseRelationships(userId: number, dbId: number): Promise<any[]> {
+    try {
+      // Get database connection
+      const db = await ConnectionsService.getConnectionById(userId, dbId);
+      if (!db) return [];
+      
+      // Currently only implemented for PostgreSQL and MySQL
+      if (db.db_type === 'postgres') {
+        const query = `
+          SELECT
+            tc.table_name as table_name,
+            kcu.column_name as column_name,
+            ccu.table_name AS foreign_table_name,
+            ccu.column_name AS foreign_column_name
+          FROM
+            information_schema.table_constraints AS tc
+            JOIN information_schema.key_column_usage AS kcu
+              ON tc.constraint_name = kcu.constraint_name
+              AND tc.table_schema = kcu.table_schema
+            JOIN information_schema.constraint_column_usage AS ccu
+              ON ccu.constraint_name = tc.constraint_name
+              AND ccu.table_schema = tc.table_schema
+          WHERE tc.constraint_type = 'FOREIGN KEY';
+        `;
+        
+        const result = await ConnectionsService.executeQuery(db, query);
+        return result;
+      } 
+      else if (db.db_type === 'mysql') {
+        const query = `
+          SELECT
+            TABLE_NAME as table_name,
+            COLUMN_NAME as column_name,
+            REFERENCED_TABLE_NAME as foreign_table_name,
+            REFERENCED_COLUMN_NAME as foreign_column_name
+          FROM
+            INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+          WHERE
+            REFERENCED_TABLE_SCHEMA = DATABASE()
+            AND REFERENCED_TABLE_NAME IS NOT NULL;
+        `;
+        
+        const result = await ConnectionsService.executeQuery(db, query);
+        return result;
+      }
+      
+      // For other database types, return empty array
+      return [];
+    } catch (error) {
+      schemaLogger.error(`Error fetching relationships for database ${dbId}: ${(error as Error).message}`);
+      return [];
+    }
+  }
+  
+  /**
+   * Cache unified schema to Redis for quick access
+   */
+  static async cacheUnifiedSchema(userId: number, dbId: number, schema: UnifiedSchema): Promise<boolean> {
+    try {
+      const { getRedisClient } = await import("../../../config/redis");
+      const redisClient = await getRedisClient();
+      
+      const key = `schema:unified:${userId}:${dbId}`;
+      await redisClient.set(key, JSON.stringify(schema), 'EX', 3600); // 1 hour expiry
+      
+      return true;
+    } catch (error) {
+      schemaLogger.warn(`Failed to cache unified schema: ${(error as Error).message}`);
+      return false;
+    }
+  }
+  
+  /**
+   * Get cached unified schema from Redis
+   */
+  static async getCachedUnifiedSchema(userId: number, dbId: number): Promise<UnifiedSchema | null> {
+    try {
+      const { getRedisClient } = await import("../../../config/redis");
+      const redisClient = await getRedisClient();
+      
+      const key = `schema:unified:${userId}:${dbId}`;
+      const cachedSchema = await redisClient.get(key);
+      
+      if (!cachedSchema) return null;
+      
+      return JSON.parse(cachedSchema) as UnifiedSchema;
+    } catch (error) {
+      schemaLogger.warn(`Failed to get cached unified schema: ${(error as Error).message}`);
+      return null;
     }
   }
 }

@@ -142,3 +142,69 @@ export const refreshDatabaseMetadata = asyncHandler(async (req: AuthRequest, res
 
   res.json({ success: true, message: "Database schema refreshed.", data: metadata });
 });
+
+/**
+ * Get unified schema for a database
+ */
+export const getUnifiedSchema = asyncHandler(async (req: AuthRequest, res: Response) => {
+  if (!req.user) {
+    return res.status(401).json({ success: false, message: "Unauthorized: User not authenticated" });
+  }
+
+  const dbId = Number(req.params.id);
+
+  if (isNaN(dbId)) {
+    return res.status(400).json({ success: false, message: "Invalid database ID." });
+  }
+
+  // Check if DB exists and user has access
+  const connection = await ConnectionsService.getConnectionById(req.user.id, dbId);
+  if (!connection) {
+    return res.status(404).json({ success: false, message: "Database not found." });
+  }
+
+  // Check for cached schema
+  const useCached = req.query.cached !== 'false';
+  let unifiedSchema = null;
+  
+  if (useCached) {
+    unifiedSchema = await SchemaService.getCachedUnifiedSchema(req.user.id, dbId);
+  }
+  
+  // If not cached or cache bypass requested, generate fresh
+  if (!unifiedSchema) {
+    unifiedSchema = await SchemaService.getUnifiedSchema(req.user.id, dbId);
+    
+    if (!unifiedSchema) {
+      return res.status(500).json({ 
+        success: false, 
+        message: "Failed to generate unified schema." 
+      });
+    }
+    
+    // Cache for future use
+    await SchemaService.cacheUnifiedSchema(req.user.id, dbId, unifiedSchema);
+  }
+
+  res.json({ 
+    success: true, 
+    schema: unifiedSchema,
+    fromCache: useCached && unifiedSchema !== null
+  });
+});
+
+/**
+ * Get unified schemas for all databases
+ */
+export const getAllUnifiedSchemas = asyncHandler(async (req: AuthRequest, res: Response) => {
+  if (!req.user) {
+    return res.status(401).json({ success: false, message: "Unauthorized: User not authenticated" });
+  }
+
+  const schemas = await SchemaService.getAllUnifiedSchemas(req.user.id);
+  
+  res.json({ 
+    success: true, 
+    schemas
+  });
+});

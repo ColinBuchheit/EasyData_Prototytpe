@@ -31,7 +31,9 @@ import {
   getTableSchema as getSchemaByTable,
   validateQuerySchema,
   getDatabaseMetadata,
-  refreshDatabaseMetadata
+  refreshDatabaseMetadata,
+  getUnifiedSchema,
+  getAllUnifiedSchemas
 } from "./controllers/schema.controller";
 
 // Health check controllers
@@ -41,6 +43,8 @@ import {
   getUnhealthyConnections,
   runScheduledHealthCheck
 } from "./controllers/health.controller";
+
+
 
 const router = Router();
 
@@ -65,6 +69,7 @@ router.delete("/connections/:id", verifyTokenMiddleware, deleteConnection);
 router.post("/connections/test", verifyTokenMiddleware, testConnection);
 router.post("/connections/query", verifyTokenMiddleware, executeConnectionQuery);
 
+
 // ==============================
 // Schema Routes
 // ==============================
@@ -73,6 +78,12 @@ router.get("/schema/:table", verifyTokenMiddleware, getSchemaByTable);
 router.post("/schema/validate", verifyTokenMiddleware, validateQuerySchema);
 router.get("/schema/metadata/:id", verifyTokenMiddleware, getDatabaseMetadata);
 router.post("/schema/metadata/:id/refresh", verifyTokenMiddleware, refreshDatabaseMetadata);
+
+// New unified schema endpoints
+router.get("/schema/unified/:id", verifyTokenMiddleware, getUnifiedSchema);
+router.get("/schema/unified", verifyTokenMiddleware, getAllUnifiedSchemas);
+
+
 
 // ==============================
 // Health Check Routes

@@ -14,6 +14,8 @@ import databaseRoutes from "./modules/database/routes";
 import queryRoutes from "./modules/query/routes";
 import analyticsRoutes from "./modules/analytics/routes";
 import userRoutes from "./modules/user/routes";
+import { checkOverallHealth } from "./modules/ai/controller/health.controller";
+
 
 // Load environment variables
 dotenv.config();
@@ -30,6 +32,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(morgan("dev"));
 
 // API Routes
+app.get("/", checkOverallHealth);
 app.use("/api/auth", authRoutes);
 app.use("/api/database", databaseRoutes);
 app.use("/api/query", queryRoutes);
@@ -42,6 +45,16 @@ app.get("/", (req, res) => {
   res.json({ 
     success: true,
     message: "🚀 EasyData API is running successfully!",
+    version: process.env.npm_package_version || "1.0.0",
+    environment: process.env.NODE_ENV || "development"
+  });
+});
+
+app.get("/health", (req, res) => {
+  res.json({ 
+    success: true,
+    status: "available",
+    message: "🚀 API is running successfully!",
     version: process.env.npm_package_version || "1.0.0",
     environment: process.env.NODE_ENV || "development"
   });
@@ -60,5 +73,6 @@ app.use((req, res, next) => {
 
 // Global error handling middleware
 app.use(globalErrorHandler);
+
 
 export default app;

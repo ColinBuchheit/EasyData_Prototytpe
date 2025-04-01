@@ -1,4 +1,5 @@
 // src/modules/auth/routes.ts
+
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import { 
@@ -11,7 +12,17 @@ import {
   resetPassword,
   changePassword
 } from "./controllers/auth.controller";
+
+import {
+  registerAgent,
+  getAgentDetails,
+  listAgents,
+  updateAgentStatus,
+  verifyAgentMiddleware
+} from "./controllers/agent.controller";
+
 import { verifyTokenMiddleware } from "./middleware/verification.middleware";
+import { requireRole } from "./middleware/rbac.middleware";
 
 const router = Router();
 
@@ -78,5 +89,13 @@ router.post("/reset-password", resetPassword);
 
 // Password change (when logged in)
 router.post("/change-password", verifyTokenMiddleware, changePassword);
+
+/**
+ * AI Agent Auth Routes
+ */
+router.post("/agent/register", registerAgent);
+router.get("/agent/:agentId", verifyTokenMiddleware, requireRole(["admin"]), getAgentDetails);
+router.get("/agents", verifyTokenMiddleware, requireRole(["admin"]), listAgents);
+router.put("/agent/:agentId/status", verifyTokenMiddleware, requireRole(["admin"]), updateAgentStatus);
 
 export default router;
