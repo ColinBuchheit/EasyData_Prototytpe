@@ -34,6 +34,14 @@ import {
   refreshDatabaseMetadata
 } from "./controllers/schema.controller";
 
+// Health check controllers (New)
+import {
+  checkConnectionHealth,
+  checkAllConnectionsHealth,
+  getUnhealthyConnections,
+  runScheduledHealthCheck
+} from "./controllers/health.controller";
+
 const router = Router();
 
 // ==============================
@@ -65,5 +73,13 @@ router.get("/schema/:table", verifyTokenMiddleware, getSchemaByTable);
 router.post("/schema/validate", verifyTokenMiddleware, validateQuerySchema);
 router.get("/schema/metadata/:id", verifyTokenMiddleware, getDatabaseMetadata);
 router.post("/schema/metadata/:id/refresh", verifyTokenMiddleware, refreshDatabaseMetadata);
+
+// ==============================
+// Health Check Routes (New)
+// ==============================
+router.get("/health/connection/:id", verifyTokenMiddleware, checkConnectionHealth);
+router.get("/health/connections", verifyTokenMiddleware, checkAllConnectionsHealth);
+router.get("/health/unhealthy", verifyTokenMiddleware, getUnhealthyConnections);
+router.post("/health/scheduled-check", verifyTokenMiddleware, requireRole(["admin"]), runScheduledHealthCheck);
 
 export default router;

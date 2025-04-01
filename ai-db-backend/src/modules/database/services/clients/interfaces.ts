@@ -34,6 +34,17 @@ export interface IDatabaseClient {
   disconnect(db: UserDatabase): Promise<void>;
 
   /**
+   * Performs a health check on the database connection
+   */
+  checkHealth?(db: UserDatabase): Promise<HealthCheckResult>;
+
+  /**
+   * Sanitizes input to prevent SQL injection and other attacks
+   * This method must be implemented by all adapters
+   */
+  sanitizeInput(input: string): string;
+
+  /**
    * Begins a database transaction
    */
   beginTransaction?(db: UserDatabase): Promise<any>;
@@ -52,4 +63,53 @@ export interface IDatabaseClient {
    * Rolls back a database transaction
    */
   rollbackTransaction?(transaction: any): Promise<void>;
+}
+
+export interface HealthCheckResult {
+  isHealthy: boolean;
+  latencyMs: number;
+  message: string;
+  timestamp: Date;
+}
+
+export interface DatabaseError extends Error {
+  code?: string;
+  sqlState?: string;
+  query?: string;
+  parameters?: any[];
+}
+
+export type DbOperation = 
+  | 'connect'
+  | 'query'
+  | 'fetchTables'
+  | 'fetchSchema'
+  | 'transaction'
+  | 'healthCheck'
+  | 'disconnect';
+
+/**
+ * Standardized error handler for database operations
+ */
+export function handleDatabaseError(
+  operation: DbOperation, 
+  error: any, 
+  database: string, 
+  query?: string
+): DatabaseError {
+  // Create a standardized error object
+  const dbError: DatabaseError = new Error(
+    `Database error during ${operation}: ${error.message}`
+  );
+  
+  // Add error details
+  dbError.name = 'DatabaseError';
+  dbError.code = error.code || error.errno || 'UNKNOWN';
+  dbError.sqlState = error.sqlState || error.state;
+  dbError.query = query;
+  
+  // Attach the original error
+  dbError.cause = error;
+  
+  return dbError;
 }

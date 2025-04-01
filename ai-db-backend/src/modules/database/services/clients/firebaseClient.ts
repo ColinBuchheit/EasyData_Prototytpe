@@ -1,9 +1,9 @@
 // src/services/userdbClients/firebaseClient.ts
 import { IDatabaseClient } from "./interfaces";
-import { UserDatabase } from "../../../../models/userDatabase.model";
 import * as admin from "firebase-admin";
 import logger from "../../../../config/logger";
 import { connectionCache, getConnectionKey } from "./adapter";
+import { UserDatabase } from "../../models/connection.model";
 
 function getFirebaseApp(db: UserDatabase): admin.app.App {
   const key = getConnectionKey(db);
@@ -37,7 +37,7 @@ export const firebaseClient: IDatabaseClient = {
 
   async fetchTables(db: UserDatabase): Promise<string[]> {
     const app = await this.connect(db);
-    
+
     try {
       const firestore = app.firestore();
       const collections = await firestore.listCollections();
@@ -50,13 +50,13 @@ export const firebaseClient: IDatabaseClient = {
 
   async fetchSchema(db: UserDatabase, collection: string): Promise<any> {
     const app = await this.connect(db);
-    
+
     try {
       const firestore = app.firestore();
       const snapshot = await firestore.collection(collection).limit(1).get();
-      
+
       if (snapshot.empty) return [];
-      
+
       const data = snapshot.docs[0].data();
       return Object.keys(data).map(key => ({ field: key, type: typeof data[key] }));
     } catch (error) {
@@ -67,24 +67,24 @@ export const firebaseClient: IDatabaseClient = {
 
   async runQuery(db: UserDatabase, query: any): Promise<any> {
     const app = await this.connect(db);
-    
+
     try {
       const firestore = app.firestore();
       const collectionName = query.collection || query.table;
       let ref = firestore.collection(collectionName);
-      
+
       // Apply filters if present
       if (query.where) {
         for (const filter of query.where) {
           ref = ref.where(filter.field, filter.operator, filter.value);
         }
       }
-      
+
       // Apply limit if specified
       if (query.limit) {
         ref = ref.limit(query.limit);
       }
-      
+
       const snapshot = await ref.get();
       return snapshot.docs.map((doc: { id: any; data: () => any; }) => ({ id: doc.id, ...doc.data() }));
     } catch (error) {
@@ -92,11 +92,11 @@ export const firebaseClient: IDatabaseClient = {
       throw new Error(`Query execution failed: ${(error as Error).message}`);
     }
   },
-  
+
   async disconnect(db: UserDatabase): Promise<void> {
     const key = getConnectionKey(db);
     const app = connectionCache[key];
-    
+
     if (app) {
       try {
         await app.delete();
@@ -106,5 +106,11 @@ export const firebaseClient: IDatabaseClient = {
         logger.error(`❌ Error deleting Firebase app: ${(error as Error).message}`);
       }
     }
+  },
+  testConnection: function (db: UserDatabase): Promise<boolean> {
+    throw new Error("Function not implemented.");
+  },
+  sanitizeInput: function (input: string): string {
+    throw new Error("Function not implemented.");
   }
 };

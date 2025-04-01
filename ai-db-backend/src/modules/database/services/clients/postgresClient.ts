@@ -23,10 +23,10 @@ function getConfig(db: UserDatabase) {
 export const postgresClient: IDatabaseClient = {
   async connect(db: UserDatabase) {
     const key = getConnectionKey(db);
-    
+
     if (!connectionCache[key]) {
       const client = new Client(getConfig(db));
-      
+
       await connectWithRetry(
         async () => {
           await client.connect();
@@ -35,16 +35,16 @@ export const postgresClient: IDatabaseClient = {
         },
         `PostgreSQL (${db.connection_name || db.database_name})`
       );
-      
+
       connectionCache[key] = client;
     }
-    
+
     return connectionCache[key];
   },
 
   async fetchTables(db: UserDatabase): Promise<string[]> {
     const client = await this.connect(db);
-    
+
     try {
       const res = await client.query(
         "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
@@ -58,7 +58,7 @@ export const postgresClient: IDatabaseClient = {
 
   async fetchSchema(db: UserDatabase, table: string): Promise<any> {
     const client = await this.connect(db);
-    
+
     try {
       const res = await client.query(
         `SELECT column_name, data_type FROM information_schema.columns WHERE table_name = $1`,
@@ -73,7 +73,7 @@ export const postgresClient: IDatabaseClient = {
 
   async runQuery(db: UserDatabase, query: string): Promise<any> {
     const client = await this.connect(db);
-    
+
     try {
       const res = await client.query(query);
       return res.rows;
@@ -82,11 +82,11 @@ export const postgresClient: IDatabaseClient = {
       throw new Error(`Query execution failed: ${(error as Error).message}`);
     }
   },
-  
+
   async disconnect(db: UserDatabase): Promise<void> {
     const key = getConnectionKey(db);
     const client = connectionCache[key];
-    
+
     if (client) {
       try {
         await client.end();
@@ -144,5 +144,8 @@ export const postgresClient: IDatabaseClient = {
       logger.error(`❌ Connection test failed: ${(error as Error).message}`);
       return false;
     }
+  },
+  sanitizeInput: function (input: string): string {
+    throw new Error("Function not implemented.");
   }
 };

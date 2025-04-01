@@ -9,7 +9,7 @@ import { firebaseClient } from "./firebaseClient";
 import { couchdbClient } from "./couchdbClient";
 import { dynamodbClient } from "./dynamodbClient";
 import logger from "../../../../config/logger";
-import { UserDatabase } from "../../../../models/userDatabase.model";
+import { UserDatabase } from "../../models/connection.model";
 
 // Cache connections for reuse
 export const connectionCache: Record<string, any> = {};

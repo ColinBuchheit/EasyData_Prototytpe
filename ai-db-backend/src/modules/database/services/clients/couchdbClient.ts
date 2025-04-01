@@ -1,6 +1,6 @@
 // src/services/userdbClients/couchdbClient.ts
 import { IDatabaseClient } from "./interfaces";
-import { UserDatabase } from "../../../../models/userDatabase.model";
+import { UserDatabase } from "../../models/connection.model";
 import nano from "nano";
 import logger from "../../../../config/logger";
 import { connectWithRetry } from "../../../../shared/utils/connectionHelpers";
@@ -17,10 +17,10 @@ function getCouchDbUrl(db: UserDatabase): string {
 export const couchdbClient: IDatabaseClient = {
   async connect(db: UserDatabase) {
     const key = getConnectionKey(db);
-    
+
     if (!connectionCache[key]) {
       const url = getCouchDbUrl(db);
-      
+
       const client = await connectWithRetry(
         async () => {
           const couchClient = nano(url);
@@ -30,16 +30,16 @@ export const couchdbClient: IDatabaseClient = {
         },
         `CouchDB (${db.connection_name || db.database_name})`
       );
-      
+
       connectionCache[key] = client;
     }
-    
+
     return connectionCache[key];
   },
 
   async fetchTables(db: UserDatabase): Promise<string[]> {
     const couch = await this.connect(db);
-    
+
     try {
       const databases = await couch.db.list();
       return databases;
@@ -51,13 +51,13 @@ export const couchdbClient: IDatabaseClient = {
 
   async fetchSchema(db: UserDatabase, dbName: string): Promise<any> {
     const couch = await this.connect(db);
-    
+
     try {
       const dbInstance = couch.use(dbName);
       const result = await dbInstance.find({ selector: {}, limit: 1 });
-      
+
       if (!result.docs.length) return [];
-      
+
       return Object.keys(result.docs[0]).map(key => ({
         field: key,
         type: typeof result.docs[0][key]
@@ -70,11 +70,11 @@ export const couchdbClient: IDatabaseClient = {
 
   async runQuery(db: UserDatabase, query: any): Promise<any> {
     const couch = await this.connect(db);
-    
+
     try {
       const dbName = query.database || query.collection || query.table;
       const dbInstance = couch.use(dbName);
-      
+
       // Handle different query types
       if (query.selector) {
         // Mango query
@@ -94,14 +94,20 @@ export const couchdbClient: IDatabaseClient = {
       throw new Error(`Query execution failed: ${(error as Error).message}`);
     }
   },
-  
+
   async disconnect(db: UserDatabase): Promise<void> {
     const key = getConnectionKey(db);
-    
+
     if (connectionCache[key]) {
       // CouchDB doesn't have an explicit disconnect method
       delete connectionCache[key];
       logger.info(`✅ CouchDB connection removed for ${db.connection_name || db.database_name}`);
     }
+  },
+  testConnection: function (db: UserDatabase): Promise<boolean> {
+    throw new Error("Function not implemented.");
+  },
+  sanitizeInput: function (input: string): string {
+    throw new Error("Function not implemented.");
   }
 };

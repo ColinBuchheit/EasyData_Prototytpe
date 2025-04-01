@@ -1,6 +1,6 @@
 // src/services/userdbClients/mssqlClient.ts
 import { IDatabaseClient } from "./interfaces";
-import { UserDatabase } from "../../../../models/userDatabase.model";
+import { UserDatabase } from "../../models/connection.model";
 import sql from "mssql";
 import logger from "../../../../config/logger";
 import { connectWithRetry } from "../../../../shared/utils/connectionHelpers";
@@ -27,7 +27,7 @@ function getConfig(db: UserDatabase): sql.config {
 export const mssqlClient: IDatabaseClient = {
   async connect(db: UserDatabase) {
     const key = getConnectionKey(db);
-    
+
     if (!connectionCache[key]) {
       const pool = await connectWithRetry(
         async () => {
@@ -38,16 +38,16 @@ export const mssqlClient: IDatabaseClient = {
         },
         `MSSQL (${db.connection_name || db.database_name})`
       );
-      
+
       connectionCache[key] = pool;
     }
-    
+
     return connectionCache[key];
   },
 
   async fetchTables(db: UserDatabase): Promise<string[]> {
     const pool = await this.connect(db);
-    
+
     try {
       const result = await pool.request().query(`
         SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE'
@@ -61,7 +61,7 @@ export const mssqlClient: IDatabaseClient = {
 
   async fetchSchema(db: UserDatabase, table: string): Promise<any> {
     const pool = await this.connect(db);
-    
+
     try {
       const result = await pool.request().query(`
         SELECT COLUMN_NAME, DATA_TYPE 
@@ -77,7 +77,7 @@ export const mssqlClient: IDatabaseClient = {
 
   async runQuery(db: UserDatabase, query: string): Promise<any> {
     const pool = await this.connect(db);
-    
+
     try {
       const result = await pool.request().query(query);
       return result.recordset;
@@ -86,11 +86,11 @@ export const mssqlClient: IDatabaseClient = {
       throw new Error(`Query execution failed: ${(error as Error).message}`);
     }
   },
-  
+
   async disconnect(db: UserDatabase): Promise<void> {
     const key = getConnectionKey(db);
     const pool = connectionCache[key];
-    
+
     if (pool) {
       try {
         await pool.close();
@@ -100,5 +100,11 @@ export const mssqlClient: IDatabaseClient = {
         logger.error(`❌ Error disconnecting from MSSQL: ${(error as Error).message}`);
       }
     }
+  },
+  testConnection: function (db: UserDatabase): Promise<boolean> {
+    throw new Error("Function not implemented.");
+  },
+  sanitizeInput: function (input: string): string {
+    throw new Error("Function not implemented.");
   }
 };

@@ -1,6 +1,6 @@
 // src/services/userdbClients/sqliteClient.ts
 import { IDatabaseClient } from "./interfaces";
-import { UserDatabase } from "../../../../models/userDatabase.model";
+import { UserDatabase } from "../../models/connection.model";
 import sqlite3 from "sqlite3";
 import { open } from "sqlite";
 import logger from "../../../../config/logger";
@@ -10,19 +10,19 @@ import { connectionCache, getConnectionKey } from "./adapter";
 export const sqliteClient: IDatabaseClient = {
   async connect(db: UserDatabase) {
     const key = getConnectionKey(db);
-    
+
     if (!connectionCache[key]) {
       const dbPath = db.host; // SQLite uses host field as file path
-      
+
       if (!dbPath) {
         throw new Error("❌ Missing SQLite database path");
       }
-      
+
       const connection = await connectWithRetry(
         async () => {
-          const conn = await open({ 
-            filename: dbPath, 
-            driver: sqlite3.Database 
+          const conn = await open({
+            filename: dbPath,
+            driver: sqlite3.Database
           });
           // Verify connection
           await conn.get("SELECT 1");
@@ -30,16 +30,16 @@ export const sqliteClient: IDatabaseClient = {
         },
         `SQLite (${db.connection_name || db.database_name})`
       );
-      
+
       connectionCache[key] = connection;
     }
-    
+
     return connectionCache[key];
   },
 
   async fetchTables(db: UserDatabase): Promise<string[]> {
     const connection = await this.connect(db);
-    
+
     try {
       const rows = await connection.all(`SELECT name FROM sqlite_master WHERE type='table'`);
       return rows.map((row: { name: any; }) => row.name);
@@ -51,7 +51,7 @@ export const sqliteClient: IDatabaseClient = {
 
   async fetchSchema(db: UserDatabase, table: string): Promise<any> {
     const connection = await this.connect(db);
-    
+
     try {
       const rows = await connection.all(`PRAGMA table_info(${table})`);
       return rows;
@@ -63,7 +63,7 @@ export const sqliteClient: IDatabaseClient = {
 
   async runQuery(db: UserDatabase, query: string): Promise<any> {
     const connection = await this.connect(db);
-    
+
     try {
       const rows = await connection.all(query);
       return rows;
@@ -72,11 +72,11 @@ export const sqliteClient: IDatabaseClient = {
       throw new Error(`Query execution failed: ${(error as Error).message}`);
     }
   },
-  
+
   async disconnect(db: UserDatabase): Promise<void> {
     const key = getConnectionKey(db);
     const connection = connectionCache[key];
-    
+
     if (connection) {
       try {
         await connection.close();
@@ -86,5 +86,11 @@ export const sqliteClient: IDatabaseClient = {
         logger.error(`❌ Error disconnecting from SQLite: ${(error as Error).message}`);
       }
     }
+  },
+  testConnection: function (db: UserDatabase): Promise<boolean> {
+    throw new Error("Function not implemented.");
+  },
+  sanitizeInput: function (input: string): string {
+    throw new Error("Function not implemented.");
   }
 };

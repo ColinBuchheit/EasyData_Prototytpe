@@ -1,6 +1,6 @@
 // src/services/userdbClients/mongodbClient.ts
 import { IDatabaseClient } from "./interfaces";
-import { UserDatabase } from "../../../../models/userDatabase.model";
+import { UserDatabase } from "../../models/connection.model";
 import { MongoClient } from "mongodb";
 import logger from "../../../../config/logger";
 import { connectWithRetry } from "../../../../shared/utils/connectionHelpers";
@@ -17,10 +17,10 @@ function getConnectionUri(db: UserDatabase): string {
 export const mongodbClient: IDatabaseClient = {
   async connect(db: UserDatabase) {
     const key = getConnectionKey(db);
-    
+
     if (!connectionCache[key]) {
       const uri = getConnectionUri(db);
-      
+
       const client = await connectWithRetry(
         async () => {
           const mongoClient = new MongoClient(uri);
@@ -31,16 +31,16 @@ export const mongodbClient: IDatabaseClient = {
         },
         `MongoDB (${db.connection_name || db.database_name})`
       );
-      
+
       connectionCache[key] = client;
     }
-    
+
     return connectionCache[key];
   },
 
   async fetchTables(db: UserDatabase): Promise<string[]> {
     const client = await this.connect(db);
-    
+
     try {
       const collections = await client.db().listCollections().toArray();
       return collections.map((col: { name: any; }) => col.name);
@@ -52,7 +52,7 @@ export const mongodbClient: IDatabaseClient = {
 
   async fetchSchema(db: UserDatabase, collection: string): Promise<any> {
     const client = await this.connect(db);
-    
+
     try {
       const doc = await client.db().collection(collection).findOne();
       return doc ? Object.keys(doc).map(key => ({ field: key, type: typeof doc[key] })) : [];
@@ -64,12 +64,12 @@ export const mongodbClient: IDatabaseClient = {
 
   async runQuery(db: UserDatabase, query: any): Promise<any> {
     const client = await this.connect(db);
-    
+
     try {
       const collection = query.collection || query.table;
       const filter = query.filter || {};
       const options = query.options || {};
-      
+
       const result = await client.db().collection(collection).find(filter, options).toArray();
       return result;
     } catch (error) {
@@ -77,11 +77,11 @@ export const mongodbClient: IDatabaseClient = {
       throw new Error(`Query execution failed: ${(error as Error).message}`);
     }
   },
-  
+
   async disconnect(db: UserDatabase): Promise<void> {
     const key = getConnectionKey(db);
     const client = connectionCache[key];
-    
+
     if (client) {
       try {
         await client.close();
@@ -91,5 +91,11 @@ export const mongodbClient: IDatabaseClient = {
         logger.error(`❌ Error disconnecting from MongoDB: ${(error as Error).message}`);
       }
     }
+  },
+  testConnection: function (db: UserDatabase): Promise<boolean> {
+    throw new Error("Function not implemented.");
+  },
+  sanitizeInput: function (input: string): string {
+    throw new Error("Function not implemented.");
   }
 };
