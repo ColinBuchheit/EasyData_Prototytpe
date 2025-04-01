@@ -11,9 +11,10 @@ from agents.chat_agent import ChatAgent
 from db_adapters.db_adapter_router import get_adapter_for_db
 from db_adapters.base_db_adapters import UserDatabase
 
-from utils.context_cache import get_context, set_context, append_to_context
+from utils.context_manager import get_context, set_context, append_to_context
 from utils.backend_bridge import fetch_query_result
 from utils.logger import logger
+from utils.error_handling import handle_agent_error, ErrorSeverity
 
 # Import the adapter for CrewAI integration
 from crewai_adapter import CrewAIAgentAdapter

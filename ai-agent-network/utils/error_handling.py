@@ -1,14 +1,15 @@
-# utils/error_standardization.py
-
+import time
 import logging
 import traceback
-from typing import Dict, Any, Optional, List, Union
-from enum import Enum
+from typing import Dict, Any, Optional, List, Union, Callable, TypeVar
 
 # Configure logger
 logger = logging.getLogger("ai-agent-error")
 
-class ErrorSeverity(Enum):
+# Type variables
+T = TypeVar('T')
+
+class ErrorSeverity:
     """Enumeration for error severity levels"""
     CRITICAL = "CRITICAL"    # System cannot continue, requires immediate attention
     HIGH = "HIGH"            # Major functionality impacted, requires urgent attention
@@ -17,7 +18,7 @@ class ErrorSeverity(Enum):
     INFO = "INFO"            # Informational message, not an error
 
 
-class ErrorCategory(Enum):
+class ErrorCategory:
     """Enumeration for error categories"""
     DATABASE = "DATABASE"          # Database connection or query errors
     AUTHENTICATION = "AUTH"        # Authentication or permission errors
@@ -32,28 +33,29 @@ class ErrorCategory(Enum):
     UNKNOWN = "UNKNOWN"            # Unclassified errors
 
 
-class StandardizedError:
+class StandardizedError(Exception):
     """Standardized error object for consistent error handling across the agent network"""
     
     def __init__(
         self,
         message: str,
-        category: ErrorCategory,
-        severity: ErrorSeverity = ErrorSeverity.MEDIUM,
+        category: str,
+        severity: str = ErrorSeverity.MEDIUM,
         code: Optional[str] = None,
         details: Optional[Dict[str, Any]] = None,
         source: Optional[str] = None,
         suggestions: Optional[List[str]] = None,
         original_error: Optional[Exception] = None
     ):
+        super().__init__(message)
         self.message = message
         self.category = category
         self.severity = severity
-        self.code = code or f"{category.value}_ERROR"
+        self.code = code or f"{category}_ERROR"
         self.details = details or {}
         self.source = source or "UNKNOWN"
         self.suggestions = suggestions or []
-        self.timestamp = logging.Formatter().converter()
+        self.timestamp = time.time()
         self.original_error = original_error
         
         # Auto-log the error based on severity
@@ -78,8 +80,8 @@ class StandardizedError:
         """Get extra information for logging"""
         extra = {
             "error_code": self.code,
-            "category": self.category.value,
-            "severity": self.severity.value,
+            "category": self.category,
+            "severity": self.severity,
             "source": self.source,
         }
         
@@ -100,8 +102,8 @@ class StandardizedError:
             "error": {
                 "message": self.message,
                 "code": self.code,
-                "category": self.category.value,
-                "severity": self.severity.value,
+                "category": self.category,
+                "severity": self.severity,
                 "source": self.source
             }
         }
@@ -116,13 +118,44 @@ class StandardizedError:
     
     def __str__(self) -> str:
         """String representation of the error"""
-        return f"{self.code} ({self.severity.value}): {self.message}"
+        return f"{self.code} ({self.severity}): {self.message}"
+
+
+def retry_on_failure(func: Callable[[], T], retries: int = 3, delay: int = 2, agent_name: str = "") -> T:
+    """
+    Retry a function up to `retries` times with exponential backoff.
+    Logs all failures. Returns the final exception if all retries fail.
+    
+    Args:
+        func: Function to retry
+        retries: Number of retry attempts
+        delay: Base delay between retries (will be multiplied by attempt number)
+        agent_name: Name of the agent for logging
+        
+    Returns:
+        Result of the function if successful
+        
+    Raises:
+        Exception: The last exception if all retries fail
+    """
+    for attempt in range(1, retries + 1):
+        try:
+            return func()
+        except Exception as e:
+            logging.warning(
+                f"[{agent_name or 'system'}] Attempt {attempt}/{retries} failed: {e}"
+            )
+            if attempt < retries:
+                time.sleep(delay * attempt)  # exponential backoff
+            else:
+                logging.error(f"[{agent_name}] All retries failed.")
+                raise
 
 
 def from_exception(
     exception: Exception,
-    category: ErrorCategory = ErrorCategory.UNKNOWN,
-    severity: ErrorSeverity = ErrorSeverity.MEDIUM,
+    category: str = ErrorCategory.UNKNOWN,
+    severity: str = ErrorSeverity.MEDIUM,
     source: Optional[str] = None,
     suggestions: Optional[List[str]] = None
 ) -> StandardizedError:
@@ -149,13 +182,76 @@ def from_exception(
         message=error_message,
         category=category,
         severity=severity,
-        code=f"{category.value}_{error_type.upper()}",
+        code=f"{category}_{error_type.upper()}",
         details={"exception_type": error_type},
         source=source,
         suggestions=suggestions,
         original_error=exception
     )
 
+
+def handle_agent_error(
+    agent_name: str,
+    error: Union[Exception, StandardizedError],
+    severity: Optional[str] = None,
+    suggestions: Optional[List[str]] = None
+) -> Dict[str, Any]:
+    """
+    Handles errors from agents and returns a standardized response.
+    
+    Args:
+        agent_name: Name of the agent
+        error: Error that occurred
+        severity: Optional severity override
+        suggestions: Optional suggestions for resolving the error
+        
+    Returns:
+        Standardized error response dictionary
+    """
+    # If already a StandardizedError, just update the source
+    if isinstance(error, StandardizedError):
+        error.source = agent_name
+        if severity:
+            error.severity = severity
+        if suggestions:
+            error.suggestions = suggestions
+        return error.to_dict()
+    
+    # Otherwise, create a new StandardizedError from the exception
+    standardized_error = from_exception(
+        exception=error,
+        category=ErrorCategory.AGENT,
+        severity=severity or ErrorSeverity.MEDIUM,
+        source=agent_name,
+        suggestions=suggestions
+    )
+    
+    return standardized_error.to_dict()
+
+
+def try_safe(agent_name: str, func: Callable, *args, **kwargs) -> Dict[str, Any]:
+    """
+    Wraps agent logic to return either a successful result or a structured error.
+    
+    Args:
+        agent_name: Name of the agent
+        func: Function to execute
+        *args: Arguments for the function
+        **kwargs: Keyword arguments for the function
+        
+    Returns:
+        Function result or error response
+    """
+    try:
+        result = func(*args, **kwargs)
+        if isinstance(result, dict) and not result.get("success", True):
+            return handle_agent_error(agent_name, Exception(result.get("error", "Unknown error")))
+        return result
+    except Exception as e:
+        return handle_agent_error(agent_name, e)
+
+
+# Helper functions for creating specific error types
 
 def create_validation_error(
     message: str,
@@ -184,7 +280,7 @@ def create_database_error(
     db_type: Optional[str] = None,
     query: Optional[str] = None,
     operation: Optional[str] = None,
-    severity: ErrorSeverity = ErrorSeverity.HIGH,
+    severity: str = ErrorSeverity.HIGH,
     source: Optional[str] = None,
     suggestions: Optional[List[str]] = None,
     original_error: Optional[Exception] = None
@@ -219,7 +315,7 @@ def create_ai_service_error(
     message: str,
     service: str,
     model: Optional[str] = None,
-    severity: ErrorSeverity = ErrorSeverity.HIGH,
+    severity: str = ErrorSeverity.HIGH,
     source: Optional[str] = None,
     suggestions: Optional[List[str]] = None,
     original_error: Optional[Exception] = None
@@ -243,63 +339,6 @@ def create_ai_service_error(
         ],
         original_error=original_error
     )
-
-
-def create_security_error(
-    message: str,
-    severity: ErrorSeverity = ErrorSeverity.HIGH,
-    source: Optional[str] = None,
-    event_type: Optional[str] = None,
-    suggestions: Optional[List[str]] = None
-) -> StandardizedError:
-    """Helper to create security-related errors"""
-    details = {}
-    if event_type:
-        details["event_type"] = event_type
-    
-    return StandardizedError(
-        message=message,
-        category=ErrorCategory.SECURITY,
-        severity=severity,
-        code="SECURITY_ERROR",
-        details=details,
-        source=source,
-        suggestions=suggestions or [
-            "Review security logs",
-            "Check for unauthorized access attempts"
-        ]
-    )
-
-
-def handle_agent_error(
-    agent_name: str,
-    error: Union[Exception, StandardizedError],
-    severity: Optional[ErrorSeverity] = None,
-    suggestions: Optional[List[str]] = None
-) -> Dict[str, Any]:
-    """
-    Handles errors from agents and returns a standardized response.
-    This is a replacement for the simple error handler in error_handler.py
-    """
-    # If already a StandardizedError, just update the source
-    if isinstance(error, StandardizedError):
-        error.source = agent_name
-        if severity:
-            error.severity = severity
-        if suggestions:
-            error.suggestions = suggestions
-        return error.to_dict()
-    
-    # Otherwise, create a new StandardizedError from the exception
-    standardized_error = from_exception(
-        exception=error,
-        category=ErrorCategory.AGENT,
-        severity=severity or ErrorSeverity.MEDIUM,
-        source=agent_name,
-        suggestions=suggestions
-    )
-    
-    return standardized_error.to_dict()
 
 
 def format_for_user(error: Union[StandardizedError, Dict[str, Any]]) -> str:

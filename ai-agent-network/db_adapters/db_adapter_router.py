@@ -1,4 +1,4 @@
-from db_adapters.db_adapter_router import BaseDBAdapter
+from db_adapters.base_db_adapters import BaseDBAdapter
 from db_adapters.postgres_adapter import PostgresAdapter
 from db_adapters.mysql_adapter import MySQLAdapter
 from db_adapters.mongodb_adapter import MongoDBAdapter
@@ -28,3 +28,34 @@ def get_adapter_for_db(db_type: str) -> BaseDBAdapter:
             return DynamoDBAdapter()
         case _:
             raise ValueError(f"Unsupported database type: {db_type}")
+
+def check_db_connection(db_info: dict) -> dict:
+    """
+    Test a database connection and return status
+    
+    Args:
+        db_info: Dictionary containing database connection info
+        
+    Returns:
+        Dictionary with connection status
+    """
+    try:
+        from db_adapters.base_db_adapters import UserDatabase
+        
+        db = UserDatabase(**db_info)
+        adapter = get_adapter_for_db(db.db_type)
+        
+        # Try to fetch tables as a simple test
+        tables = adapter.fetch_tables(db)
+        
+        return {
+            "status": "ok",
+            "message": f"Successfully connected to {db.db_type} database",
+            "tables_count": len(tables)
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to connect to database: {str(e)}",
+            "error_type": type(e).__name__
+        }
