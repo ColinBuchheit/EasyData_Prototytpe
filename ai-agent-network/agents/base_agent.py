@@ -1,98 +1,56 @@
-from agents.base_agent import BaseAgent
+from abc import ABC, abstractmethod
 from typing import Dict, Any
-import os
-import requests
-import json
+import logging
 
-from utils.settings import ANTHROPIC_API_KEY, CHAT_MODEL
 from utils.logger import logger
-from utils.token_usage_tracker import track_tokens
-from utils.api_client import APIClient
-from utils.error_handling import handle_agent_error, ErrorSeverity, create_ai_service_error
 
-
-class ChatAgent(BaseAgent):
+class BaseAgent(ABC):
     """
-    Converts technical output into human-friendly language.
-    Uses Claude 3 Sonnet to summarize query results for business users.
+    Abstract base class for all agents in the AI Agent Network.
+    Provides common functionality and required interface.
     """
 
-    def run(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        try:
-            task = input_data.get("task", "")
-            raw_output = input_data.get("query_result") or input_data.get("raw_output")
-            tone = input_data.get("tone", "friendly")
+    def name(self) -> str:
+        """Returns the name of the agent (default: class name)"""
+        return self.__class__.__name__
 
-            if not raw_output:
-                logger.warning("⚠️ ChatAgent missing raw_output or query_result")
-                return handle_agent_error(
-                    self.name(),
-                    ValueError("Missing raw_output for explanation."),
-                    ErrorSeverity.MEDIUM
-                )
-
-            logger.info(f"💬 ChatAgent summarizing task in tone: {tone}")
-
-            prompt = f"""
-Task:
-{task}
-
-Output to explain:
-{raw_output}
-
-Explain this output to a business user in a {tone} tone. Use plain language. Do not include any charts or code.
-"""
-
-            reply = self._ask_claude(prompt)
-
-            return {
-                "success": True,
-                "type": "text",
-                "agent": self.name(),
-                "message": reply.strip()
-            }
-
-        except Exception as e:
-            logger.exception("❌ ChatAgent failed to run.")
-            return handle_agent_error(self.name(), e, ErrorSeverity.MEDIUM)
-
-    def _ask_claude(self, prompt: str) -> str:
-        """Call Claude API with improved error handling and retries"""
-        payload = {
-            "model": CHAT_MODEL,
-            "max_tokens": 512,
-            "temperature": 0.5,
-            "system": "You are a helpful assistant that explains technical outputs to business users.",
-            "messages": [
-                {"role": "user", "content": prompt}
-            ]
+    def info(self) -> Dict[str, Any]:
+        """Returns metadata about the agent"""
+        return {
+            "name": self.name(),
+            "description": self.__doc__ or "No description available",
+            "version": "1.0.0"
         }
 
-        try:
-            # Use the APIClient utility for retries and timeouts
-            response = APIClient.call_anthropic_api(
-                endpoint="messages",
-                payload=payload,
-                api_key=ANTHROPIC_API_KEY,
-                retries=3,
-                timeout=30
-            )
+    @abstractmethod
+    def run(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Execute the agent's main functionality.
+        
+        Args:
+            input_data: Dictionary containing input data for the agent
+            
+        Returns:
+            Dictionary containing the agent's output with at least a 'success' flag
+        """
+        pass
 
-            # Claude doesn't return token usage yet — approximate:
-            token_guess = len(prompt.split()) + 150
-            track_tokens("chat_agent", CHAT_MODEL, token_guess // 2, token_guess // 2)
-
-            content = response["content"][0]["text"]
-            return content
-
-        except Exception as e:
-            logger.error(f"❌ Claude call failed in ChatAgent: {e}")
-            return create_ai_service_error(
-                message=f"Failed to communicate with Claude: {str(e)}",
-                service="anthropic",
-                model=CHAT_MODEL,
-                severity=ErrorSeverity.MEDIUM,
-                source=self.name(),
-                original_error=e,
-                suggestions=["Verify Anthropic API key", "Check API access"]
-            ).to_dict().get("error", {}).get("message", "The assistant was unable to summarize the output.")
+    def validate_output(self, output: Any) -> bool:
+        """
+        Validates the output of the agent for expected structure.
+        
+        Args:
+            output: Agent output to validate
+            
+        Returns:
+            True if output is valid, False otherwise
+        """
+        if not isinstance(output, dict):
+            logger.warning(f"{self.name()}: Output is not a dictionary")
+            return False
+            
+        if "success" not in output:
+            logger.warning(f"{self.name()}: Output missing 'success' field")
+            return False
+            
+        return True
