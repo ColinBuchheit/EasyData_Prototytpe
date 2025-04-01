@@ -1,5 +1,5 @@
-// src/services/userdbClients/mssqlClient.ts
-import { IDatabaseClient } from "./interfaces";
+// src/modules/database/services/clients/mssqlClient.ts
+import { IDatabaseClient, handleDatabaseError, HealthCheckResult } from "./interfaces";
 import { UserDatabase } from "../../models/connection.model";
 import sql from "mssql";
 import logger from "../../../../config/logger";
@@ -13,16 +13,26 @@ function getConfig(db: UserDatabase): sql.config {
 
   return {
     user: db.username,
-    password: db.encrypted_password,
+    password: db.encrypted_password, // Already decrypted by ConnectionService
     server: db.host,
     port: db.port,
     database: db.database_name,
     options: {
-      encrypt: false,
+      encrypt: false, // Set to true if you're connecting to Azure
       trustServerCertificate: true,
     },
+    // Add timeouts
+    connectionTimeout: 15000,
+    requestTimeout: 15000,
+    pool: {
+      max: 10,
+      min: 0,
+      idleTimeoutMillis: 30000
+    }
   };
 }
+
+// Rest of the MSSQL client implementation...
 
 export const mssqlClient: IDatabaseClient = {
   async connect(db: UserDatabase) {

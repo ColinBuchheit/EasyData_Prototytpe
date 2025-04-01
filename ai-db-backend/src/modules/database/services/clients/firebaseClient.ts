@@ -1,9 +1,9 @@
-// src/services/userdbClients/firebaseClient.ts
-import { IDatabaseClient } from "./interfaces";
+// src/modules/database/services/clients/firebaseClient.ts
+import { IDatabaseClient, handleDatabaseError, HealthCheckResult } from "./interfaces";
+import { UserDatabase } from "../../models/connection.model";
 import * as admin from "firebase-admin";
 import logger from "../../../../config/logger";
 import { connectionCache, getConnectionKey } from "./adapter";
-import { UserDatabase } from "../../models/connection.model";
 
 function getFirebaseApp(db: UserDatabase): admin.app.App {
   const key = getConnectionKey(db);
@@ -14,21 +14,25 @@ function getFirebaseApp(db: UserDatabase): admin.app.App {
     }
     
     try {
-      // Assuming credentials are stored in base64 encoded JSON
+      // For Firebase, the encrypted_password field contains the credentials JSON
+      // It should already be decrypted by the ConnectionService
       const credential = admin.credential.cert(
-        JSON.parse(Buffer.from(db.encrypted_password, "base64").toString())
+        JSON.parse(db.encrypted_password)
       );
       
       connectionCache[key] = admin.initializeApp({ credential }, key);
       logger.info(`✅ Firebase connection established for ${db.connection_name || db.database_name}`);
-    } catch (error) {
-      logger.error(`❌ Error initializing Firebase app: ${(error as Error).message}`);
-      throw new Error(`Firebase initialization failed: ${(error as Error).message}`);
+    } catch (error: unknown) {
+      const dbError = handleDatabaseError('connect', error, 'Firebase');
+      logger.error(`❌ Error initializing Firebase app: ${dbError.message}`);
+      throw dbError;
     }
   }
   
   return connectionCache[key];
 }
+
+// Rest of the Firebase client implementation...
 
 export const firebaseClient: IDatabaseClient = {
   async connect(db: UserDatabase) {

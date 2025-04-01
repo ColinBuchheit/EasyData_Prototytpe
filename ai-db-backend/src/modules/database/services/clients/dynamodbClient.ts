@@ -28,13 +28,15 @@ function getConfig(db: UserDatabase) {
     region,
     credentials: {
       accessKeyId: db.username,
-      secretAccessKey: db.encrypted_password,
+      secretAccessKey: db.encrypted_password, // ConnectionService now handles decryption
     },
     // Add timeouts for better error handling
     maxAttempts: 3,
     timeout: 10000 // 10 seconds
   };
 }
+
+// Rest of the DynamoDB client implementation...
 
 export const dynamodbClient: IDatabaseClient = {
   async connect(db: UserDatabase) {

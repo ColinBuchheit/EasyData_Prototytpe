@@ -1,5 +1,5 @@
-// src/services/userdbClients/couchdbClient.ts
-import { IDatabaseClient } from "./interfaces";
+// src/modules/database/services/clients/couchdbClient.ts
+import { IDatabaseClient, handleDatabaseError, HealthCheckResult } from "./interfaces";
 import { UserDatabase } from "../../models/connection.model";
 import nano from "nano";
 import logger from "../../../../config/logger";
@@ -11,8 +11,11 @@ function getCouchDbUrl(db: UserDatabase): string {
     throw new Error("❌ Missing CouchDB connection fields.");
   }
   
-  return `http://${db.username}:${db.encrypted_password}@${db.host}:${db.port}`;
+  // Use the already-decrypted password from ConnectionService
+  return `http://${db.username}:${encodeURIComponent(db.encrypted_password)}@${db.host}:${db.port}`;
 }
+
+// Rest of the CouchDB client implementation...
 
 export const couchdbClient: IDatabaseClient = {
   async connect(db: UserDatabase) {

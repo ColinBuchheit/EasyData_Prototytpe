@@ -4,7 +4,7 @@ import { pool } from "../../../config/db";
 import { createContextLogger } from "../../../config/logger";
 import { DatabaseConnectionConfig, UserDatabase } from "../models/connection.model";
 import { getClientForDB } from "./clients";
-import { encrypt } from "../../../shared/utils/encryption";
+import { encrypt, decrypt } from "../../../shared/utils/encryption";
 import { DatabaseType } from "../models/database.types.model";
 
 const connectionsLogger = createContextLogger("ConnectionsService");
@@ -52,7 +52,7 @@ export class ConnectionsService {
   static async getUserConnections(userId: number): Promise<UserDatabase[]> {
     try {
       const result = await pool.query(
-        `SELECT id, user_id, connection_name, db_type, host, port, username, database_name, 
+        `SELECT id, user_id, connection_name, db_type, host, port, username, encrypted_password, database_name, 
         is_connected, created_at, updated_at 
         FROM user_databases WHERE user_id = $1`,
         [userId]
@@ -70,7 +70,7 @@ export class ConnectionsService {
   static async getConnectionById(userId: number, dbId: number): Promise<UserDatabase | null> {
     try {
       const result = await pool.query(
-        `SELECT id, user_id, connection_name, db_type, host, port, username, database_name, 
+        `SELECT id, user_id, connection_name, db_type, host, port, username, encrypted_password, database_name, 
         is_connected, created_at, updated_at 
         FROM user_databases WHERE id = $1 AND user_id = $2`,
         [dbId, userId]
@@ -83,12 +83,56 @@ export class ConnectionsService {
     }
   }
 
+  /**
+   * Get database with decrypted password
+   * Helper method to get database with decrypted password for client operations
+   */
+  static async getConnectionWithDecryptedPassword(userId: number, dbId: number): Promise<UserDatabase | null> {
+    const db = await this.getConnectionById(userId, dbId);
+    
+    if (!db) {
+      return null;
+    }
+    
+    // Create a new object with the decrypted password
+    try {
+      if (db.encrypted_password) {
+        return {
+          ...db,
+          // Store decrypted password in the same field for client usage
+          // This won't be persisted to the database
+          encrypted_password: decrypt(db.encrypted_password)
+        };
+      }
+      return db;
+    } catch (error) {
+      connectionsLogger.error(`Failed to decrypt database password for ${dbId}: ${(error as Error).message}`);
+      throw new Error("Failed to authenticate with database: Password decryption failed");
+    }
+  }
+
   // Add new method for transactions
   static async executeTransactionQueries(
     db: UserDatabase, 
     queries: string[]
   ): Promise<any[]> {
     try {
+      // Make sure we're using a database with decrypted password
+      let dbWithDecryptedPassword = db;
+      
+      // If the password is still encrypted, decrypt it
+      if (db.encrypted_password && !db.encrypted_password.includes("decrypted:")) {
+        try {
+          dbWithDecryptedPassword = {
+            ...db,
+            encrypted_password: decrypt(db.encrypted_password)
+          };
+        } catch (error) {
+          connectionsLogger.error(`Failed to decrypt password for transaction: ${(error as Error).message}`);
+          throw new Error("Failed to authenticate with database: Password decryption failed");
+        }
+      }
+      
       const client = getClientForDB(db.db_type as DatabaseType);
       
       // Check if this client has transaction support
@@ -98,14 +142,14 @@ export class ConnectionsService {
         
         const results = [];
         for (const query of queries) {
-          const result = await client.runQuery(db, query);
+          const result = await client.runQuery(dbWithDecryptedPassword, query);
           results.push(result);
         }
         return results;
       }
       
       // Execute transaction
-      const transaction = await client.beginTransaction(db);
+      const transaction = await client.beginTransaction(dbWithDecryptedPassword);
       
       try {
         const results = [];
@@ -191,28 +235,28 @@ export class ConnectionsService {
     }
   }
 
-/**
+  /**
    * Delete a database connection
    */
-static async deleteConnection(userId: number, dbId: number): Promise<boolean> {
-  try {
-    const result = await pool.query(
-      "DELETE FROM user_databases WHERE id = $1 AND user_id = $2 RETURNING id",
-      [dbId, userId]
-    );
-    
-    // Fix for TypeScript error: handle potential null value
-    const deleted = (result.rowCount ?? 0) > 0;
-    if (deleted) {
-      connectionsLogger.info(`Database connection ID ${dbId} deleted for User ${userId}`);
+  static async deleteConnection(userId: number, dbId: number): Promise<boolean> {
+    try {
+      const result = await pool.query(
+        "DELETE FROM user_databases WHERE id = $1 AND user_id = $2 RETURNING id",
+        [dbId, userId]
+      );
+      
+      // Fix for TypeScript error: handle potential null value
+      const deleted = (result.rowCount ?? 0) > 0;
+      if (deleted) {
+        connectionsLogger.info(`Database connection ID ${dbId} deleted for User ${userId}`);
+      }
+      
+      return deleted;
+    } catch (error) {
+      connectionsLogger.error(`Error deleting database connection ID ${dbId}: ${(error as Error).message}`);
+      throw new Error("Failed to delete database connection.");
     }
-    
-    return deleted;
-  } catch (error) {
-    connectionsLogger.error(`Error deleting database connection ID ${dbId}: ${(error as Error).message}`);
-    throw new Error("Failed to delete database connection.");
   }
-}
 
   /**
    * Test a database connection
@@ -228,7 +272,7 @@ static async deleteConnection(userId: number, dbId: number): Promise<boolean> {
         host: config.host,
         port: config.port,
         username: config.username,
-        encrypted_password: encrypt(config.password), // Encrypt the password
+        encrypted_password: config.password, // Use unencrypted password for testing
         database_name: config.dbName,
         is_connected: false,
         created_at: new Date()
@@ -252,8 +296,24 @@ static async deleteConnection(userId: number, dbId: number): Promise<boolean> {
    */
   static async executeQuery(db: UserDatabase, query: string): Promise<any> {
     try {
+      // Make sure we're using a database with decrypted password
+      let dbWithDecryptedPassword = db;
+      
+      // If the password is still encrypted, decrypt it
+      if (db.encrypted_password && !db.encrypted_password.includes("decrypted:")) {
+        try {
+          dbWithDecryptedPassword = {
+            ...db,
+            encrypted_password: decrypt(db.encrypted_password)
+          };
+        } catch (error) {
+          connectionsLogger.error(`Failed to decrypt password for query: ${(error as Error).message}`);
+          throw new Error("Failed to authenticate with database: Password decryption failed");
+        }
+      }
+      
       const client = getClientForDB(db.db_type as DatabaseType);
-      return await client.runQuery(db, query);
+      return await client.runQuery(dbWithDecryptedPassword, query);
     } catch (error) {
       connectionsLogger.error(`Query execution failed: ${(error as Error).message}`);
       throw new Error(`Query execution failed: ${(error as Error).message}`);
@@ -265,8 +325,24 @@ static async deleteConnection(userId: number, dbId: number): Promise<boolean> {
    */
   static async fetchTablesFromConnection(db: UserDatabase): Promise<string[]> {
     try {
+      // Make sure we're using a database with decrypted password
+      let dbWithDecryptedPassword = db;
+      
+      // If the password is still encrypted, decrypt it
+      if (db.encrypted_password && !db.encrypted_password.includes("decrypted:")) {
+        try {
+          dbWithDecryptedPassword = {
+            ...db,
+            encrypted_password: decrypt(db.encrypted_password)
+          };
+        } catch (error) {
+          connectionsLogger.error(`Failed to decrypt password for fetching tables: ${(error as Error).message}`);
+          throw new Error("Failed to authenticate with database: Password decryption failed");
+        }
+      }
+      
       const client = getClientForDB(db.db_type as DatabaseType);
-      return await client.fetchTables(db);
+      return await client.fetchTables(dbWithDecryptedPassword);
     } catch (error) {
       connectionsLogger.error(`Error fetching tables from connection: ${(error as Error).message}`);
       throw new Error(`Failed to fetch tables: ${(error as Error).message}`);
@@ -278,8 +354,24 @@ static async deleteConnection(userId: number, dbId: number): Promise<boolean> {
    */
   static async fetchSchemaFromConnection(db: UserDatabase, table: string): Promise<any> {
     try {
+      // Make sure we're using a database with decrypted password
+      let dbWithDecryptedPassword = db;
+      
+      // If the password is still encrypted, decrypt it
+      if (db.encrypted_password && !db.encrypted_password.includes("decrypted:")) {
+        try {
+          dbWithDecryptedPassword = {
+            ...db,
+            encrypted_password: decrypt(db.encrypted_password)
+          };
+        } catch (error) {
+          connectionsLogger.error(`Failed to decrypt password for fetching schema: ${(error as Error).message}`);
+          throw new Error("Failed to authenticate with database: Password decryption failed");
+        }
+      }
+      
       const client = getClientForDB(db.db_type as DatabaseType);
-      return await client.fetchSchema(db, table);
+      return await client.fetchSchema(dbWithDecryptedPassword, table);
     } catch (error) {
       connectionsLogger.error(`Error fetching schema from connection: ${(error as Error).message}`);
       throw new Error(`Failed to fetch schema: ${(error as Error).message}`);

@@ -1,5 +1,5 @@
-// src/services/userdbClients/mongodbClient.ts
-import { IDatabaseClient } from "./interfaces";
+// src/modules/database/services/clients/mongodbClient.ts
+import { IDatabaseClient, handleDatabaseError, HealthCheckResult } from "./interfaces";
 import { UserDatabase } from "../../models/connection.model";
 import { MongoClient } from "mongodb";
 import logger from "../../../../config/logger";
@@ -11,8 +11,11 @@ function getConnectionUri(db: UserDatabase): string {
     throw new Error("❌ Missing MongoDB connection fields.");
   }
   
-  return `mongodb://${db.username}:${db.encrypted_password}@${db.host}:${db.port}/${db.database_name}`;
+  // Use the already-decrypted password from ConnectionService
+  return `mongodb://${db.username}:${encodeURIComponent(db.encrypted_password)}@${db.host}:${db.port}/${db.database_name}`;
 }
+
+// Rest of the MongoDB client implementation...
 
 export const mongodbClient: IDatabaseClient = {
   async connect(db: UserDatabase) {

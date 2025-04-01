@@ -15,7 +15,7 @@ function getConnectionConfig(db: UserDatabase): mysql.ConnectionOptions {
     host: db.host,
     port: db.port,
     user: db.username,
-    password: db.encrypted_password,
+    password: db.encrypted_password, // ConnectionService now handles decryption
     database: db.database_name,
     // Add timeouts for better error handling
     connectTimeout: 10000, // 10 seconds
@@ -43,7 +43,7 @@ export const mysqlClient: IDatabaseClient = {
         );
         
         connectionCache[key] = connection;
-      } catch (error) {
+      } catch (error: unknown) {
         const dbError = handleDatabaseError('connect', error, 'MySQL');
         logger.error(`❌ MySQL connection error: ${dbError.message}`);
         throw dbError;
@@ -62,7 +62,7 @@ export const mysqlClient: IDatabaseClient = {
       const tableKey = Object.keys(rows[0])[0]; // e.g., "Tables_in_mydb"
       
       return rows.map(row => row[tableKey]);
-    } catch (error) {
+    } catch (error: unknown) {
       const dbError = handleDatabaseError('fetchTables', error, 'MySQL');
       logger.error(`❌ Error fetching MySQL tables: ${dbError.message}`);
       throw dbError;
@@ -78,7 +78,7 @@ export const mysqlClient: IDatabaseClient = {
       
       const [rows] = await connection.query(`DESCRIBE \`${sanitizedTable}\``);
       return rows;
-    } catch (error) {
+    } catch (error: unknown) {
       const dbError = handleDatabaseError('fetchSchema', error, 'MySQL');
       logger.error(`❌ Error fetching schema for MySQL table ${table}: ${dbError.message}`);
       throw dbError;
@@ -97,7 +97,7 @@ export const mysqlClient: IDatabaseClient = {
         const [rows] = await connection.query(query);
         return rows;
       }
-    } catch (error) {
+    } catch (error: unknown) {
       const dbError = handleDatabaseError('query', error, 'MySQL', query);
       logger.error(`❌ Error executing MySQL query: ${dbError.message}`);
       throw dbError;
@@ -113,10 +113,9 @@ export const mysqlClient: IDatabaseClient = {
         await connection.end();
         delete connectionCache[key];
         logger.info(`✅ MySQL connection closed for ${db.connection_name || db.database_name}`);
-      } catch (error) {
+      } catch (error: unknown) {
         const dbError = handleDatabaseError('disconnect', error, 'MySQL');
         logger.error(`❌ Error disconnecting from MySQL: ${dbError.message}`);
-        throw dbError;
       }
     }
   },
@@ -127,8 +126,9 @@ export const mysqlClient: IDatabaseClient = {
       await conn.query("SELECT 1");
       await conn.end();
       return true;
-    } catch (error) {
-      logger.warn(`MySQL connection test failed: ${error.message}`);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.warn(`MySQL connection test failed: ${errorMessage}`);
       return false;
     }
   },
@@ -147,6 +147,11 @@ export const mysqlClient: IDatabaseClient = {
       const threadsConnected = Array.isArray(statusResult) && statusResult.length > 0 ? 
         (statusResult[0] as any).Value : 'unknown';
       
+      // Get server version
+      const [versionResult] = await connection.query('SELECT VERSION() as version');
+      const version = Array.isArray(versionResult) && versionResult.length > 0 ?
+        (versionResult[0] as any).version : 'unknown';
+      
       await connection.end();
       
       const endTime = Date.now();
@@ -155,17 +160,18 @@ export const mysqlClient: IDatabaseClient = {
       return {
         isHealthy: isConnected,
         latencyMs,
-        message: `Connection healthy. Current connections: ${threadsConnected}`,
+        message: `MySQL server healthy. Version: ${version}. Current connections: ${threadsConnected}`,
         timestamp: new Date()
       };
-    } catch (error) {
+    } catch (error: unknown) {
       const endTime = Date.now();
       const latencyMs = endTime - startTime;
+      const errorMessage = error instanceof Error ? error.message : String(error);
       
       return {
         isHealthy: false,
         latencyMs,
-        message: `Health check failed: ${error.message}`,
+        message: `Health check failed: ${errorMessage}`,
         timestamp: new Date()
       };
     }
@@ -177,7 +183,7 @@ export const mysqlClient: IDatabaseClient = {
       const connection = await this.connect(db);
       await connection.beginTransaction();
       return connection;
-    } catch (error) {
+    } catch (error: unknown) {
       const dbError = handleDatabaseError('transaction', error, 'MySQL');
       logger.error(`❌ Error beginning MySQL transaction: ${dbError.message}`);
       throw dbError;
@@ -187,7 +193,7 @@ export const mysqlClient: IDatabaseClient = {
   async commitTransaction(transaction: mysql.Connection): Promise<void> {
     try {
       await transaction.commit();
-    } catch (error) {
+    } catch (error: unknown) {
       const dbError = handleDatabaseError('transaction', error, 'MySQL');
       logger.error(`❌ Error committing MySQL transaction: ${dbError.message}`);
       throw dbError;
@@ -197,7 +203,7 @@ export const mysqlClient: IDatabaseClient = {
   async rollbackTransaction(transaction: mysql.Connection): Promise<void> {
     try {
       await transaction.rollback();
-    } catch (error) {
+    } catch (error: unknown) {
       const dbError = handleDatabaseError('transaction', error, 'MySQL');
       logger.error(`❌ Error rolling back MySQL transaction: ${dbError.message}`);
       // We don't re-throw here since this is already error recovery
@@ -214,7 +220,7 @@ export const mysqlClient: IDatabaseClient = {
         const [rows] = await transaction.query(query);
         return rows;
       }
-    } catch (error) {
+    } catch (error: unknown) {
       const dbError = handleDatabaseError('query', error, 'MySQL', query);
       logger.error(`❌ Error executing MySQL query in transaction: ${dbError.message}`);
       throw dbError;
