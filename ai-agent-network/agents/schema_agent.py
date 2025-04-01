@@ -8,6 +8,7 @@ import json
 
 from utils.settings import OPENAI_API_KEY, SCHEMA_ANALYSIS_MODEL
 from utils.logger import logger
+from utils.error_handling import handle_agent_error, ErrorSeverity, create_database_error, create_ai_service_error
 
 class SchemaAgent(BaseAgent):
     """
@@ -39,7 +40,11 @@ class SchemaAgent(BaseAgent):
             tables = adapter.fetch_tables(db)
             if not tables:
                 logger.warning("⚠️ No tables found in user DB.")
-                return {"success": False, "error": "No tables found in database."}
+                return handle_agent_error(
+                    self.name(),
+                    ValueError("No tables found in database."),
+                    ErrorSeverity.MEDIUM
+                )
 
             schema = {}
             for table in tables:
@@ -64,7 +69,18 @@ class SchemaAgent(BaseAgent):
 
         except Exception as e:
             logger.exception("❌ SchemaAgent encountered a fatal error.")
-            return {"success": False, "error": str(e)}
+            # Since this is directly related to database operations, we use a specialized handler
+            if "db" in input_data and hasattr(input_data["db"], 'db_type'):
+                return create_database_error(
+                    message=f"Failed to fetch schema: {str(e)}",
+                    db_type=input_data["db"].db_type,
+                    operation="schema_fetch",
+                    source=self.name(),
+                    severity=ErrorSeverity.HIGH,
+                    original_error=e
+                ).to_dict()
+            else:
+                return handle_agent_error(self.name(), e, ErrorSeverity.HIGH)
 
     def _analyze_schema(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         try:
@@ -75,7 +91,11 @@ class SchemaAgent(BaseAgent):
             
             if not all([db_id, db_type, schema_details]):
                 logger.warning("❌ Schema analysis missing required inputs")
-                return {"success": False, "error": "Missing required schema information"}
+                return handle_agent_error(
+                    self.name(),
+                    ValueError("Missing required schema information"),
+                    ErrorSeverity.MEDIUM
+                )
 
             logger.info(f"🔍 Analyzing schema for database {db_name} (ID: {db_id})")
             
@@ -85,37 +105,52 @@ class SchemaAgent(BaseAgent):
             # Generate prompt for schema analysis
             prompt = self._build_analysis_prompt(db_type, db_name, formatted_schema)
             
-            # Call API for analysis
-            response = openai.ChatCompletion.create(
-                model=SCHEMA_ANALYSIS_MODEL,
-                messages=[
-                    {"role": "system", "content": "You are a database expert that analyzes database schemas to identify their content, domain, and purpose."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.3
-            )
-            
-            # Parse response
             try:
-                analysis = json.loads(response.choices[0].message.content)
+                # Call API for analysis
+                response = openai.ChatCompletion.create(
+                    model=SCHEMA_ANALYSIS_MODEL,
+                    messages=[
+                        {"role": "system", "content": "You are a database expert that analyzes database schemas to identify their content, domain, and purpose."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.3
+                )
                 
-                required_keys = ["tables", "domainType", "contentDescription", "dataCategory"]
-                if not all(key in analysis for key in required_keys):
-                    raise ValueError("Missing required keys in schema analysis")
-                
-                logger.info(f"✅ Schema analysis complete for {db_name}. Domain: {analysis['domainType']}")
-                return {
-                    "success": True,
-                    **analysis
-                }
-                
-            except (json.JSONDecodeError, ValueError) as e:
-                logger.error(f"❌ Failed to parse schema analysis: {str(e)}")
-                return {"success": False, "error": f"Invalid schema analysis format: {str(e)}"}
+                # Parse response
+                try:
+                    analysis = json.loads(response.choices[0].message.content)
+                    
+                    required_keys = ["tables", "domainType", "contentDescription", "dataCategory"]
+                    if not all(key in analysis for key in required_keys):
+                        raise ValueError("Missing required keys in schema analysis")
+                    
+                    logger.info(f"✅ Schema analysis complete for {db_name}. Domain: {analysis['domainType']}")
+                    return {
+                        "success": True,
+                        **analysis
+                    }
+                    
+                except (json.JSONDecodeError, ValueError) as e:
+                    logger.error(f"❌ Failed to parse schema analysis: {str(e)}")
+                    return handle_agent_error(
+                        self.name(),
+                        e,
+                        ErrorSeverity.MEDIUM,
+                        suggestions=["Check API response format", "Verify schema format"]
+                    )
+            except openai.error.OpenAIError as e:
+                return create_ai_service_error(
+                    message=f"OpenAI API error during schema analysis: {str(e)}",
+                    service="openai",
+                    model=SCHEMA_ANALYSIS_MODEL,
+                    source=self.name(),
+                    severity=ErrorSeverity.HIGH,
+                    original_error=e
+                ).to_dict()
             
         except Exception as e:
             logger.exception(f"❌ Schema analysis failed: {str(e)}")
-            return {"success": False, "error": str(e)}
+            return handle_agent_error(self.name(), e, ErrorSeverity.HIGH)
 
     def _match_database_for_query(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         try:
@@ -125,53 +160,73 @@ class SchemaAgent(BaseAgent):
             
             if not query or not databases:
                 logger.warning("❌ Database matching missing query or databases")
-                return {"success": False, "error": "Missing query or database information"}
+                return handle_agent_error(
+                    self.name(),
+                    ValueError("Missing query or database information"),
+                    ErrorSeverity.MEDIUM
+                )
 
             logger.info(f"🔍 Matching query to database for user {user_id}")
             
             # Generate prompt for database matching
             prompt = self._build_matching_prompt(query, databases)
             
-            # Call API for analysis
-            response = openai.ChatCompletion.create(
-                model=SCHEMA_ANALYSIS_MODEL, # Can reuse the same model
-                messages=[
-                    {"role": "system", "content": "You are an expert at determining which database contains information relevant to a user's query."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.2
-            )
-            
-            # Parse response
             try:
-                result = json.loads(response.choices[0].message.content)
+                # Call API for analysis
+                response = openai.ChatCompletion.create(
+                    model=SCHEMA_ANALYSIS_MODEL, # Can reuse the same model
+                    messages=[
+                        {"role": "system", "content": "You are an expert at determining which database contains information relevant to a user's query."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.2
+                )
                 
-                if "selectedDbId" not in result:
-                    raise ValueError("Missing required selectedDbId in response")
-                
-                # Validate that selected DB is one of the available DBs
-                selected_db_id = result["selectedDbId"]
-                db_ids = [db["dbId"] for db in databases]
-                
-                if selected_db_id not in db_ids:
-                    raise ValueError(f"Selected DB ID {selected_db_id} not in available database IDs: {db_ids}")
-                
-                logger.info(f"✅ Selected database {selected_db_id} for query")
-                
-                return {
-                    "success": True,
-                    "selectedDbId": selected_db_id,
-                    "confidence": result.get("confidence", 0.0),
-                    "reasoning": result.get("reasoning", "")
-                }
-                
-            except (json.JSONDecodeError, ValueError) as e:
-                logger.error(f"❌ Failed to parse database matching result: {str(e)}")
-                return {"success": False, "error": f"Invalid database matching format: {str(e)}"}
+                # Parse response
+                try:
+                    result = json.loads(response.choices[0].message.content)
+                    
+                    if "selectedDbId" not in result:
+                        raise ValueError("Missing required selectedDbId in response")
+                    
+                    # Validate that selected DB is one of the available DBs
+                    selected_db_id = result["selectedDbId"]
+                    db_ids = [db["dbId"] for db in databases]
+                    
+                    if selected_db_id not in db_ids:
+                        raise ValueError(f"Selected DB ID {selected_db_id} not in available database IDs: {db_ids}")
+                    
+                    logger.info(f"✅ Selected database {selected_db_id} for query")
+                    
+                    return {
+                        "success": True,
+                        "selectedDbId": selected_db_id,
+                        "confidence": result.get("confidence", 0.0),
+                        "reasoning": result.get("reasoning", "")
+                    }
+                    
+                except (json.JSONDecodeError, ValueError) as e:
+                    logger.error(f"❌ Failed to parse database matching result: {str(e)}")
+                    return handle_agent_error(
+                        self.name(), 
+                        e, 
+                        ErrorSeverity.MEDIUM,
+                        suggestions=["Check API response format", "Verify database IDs"]
+                    )
+            
+            except openai.error.OpenAIError as e:
+                return create_ai_service_error(
+                    message=f"OpenAI API error during database matching: {str(e)}",
+                    service="openai",
+                    model=SCHEMA_ANALYSIS_MODEL,
+                    source=self.name(),
+                    severity=ErrorSeverity.HIGH,
+                    original_error=e
+                ).to_dict()
             
         except Exception as e:
             logger.exception(f"❌ Database matching failed: {str(e)}")
-            return {"success": False, "error": str(e)}
+            return handle_agent_error(self.name(), e, ErrorSeverity.HIGH)
 
     def _parse_columns(self, raw: Any, db_type: str) -> List[Dict[str, str]]:
         # Your existing code...

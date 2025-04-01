@@ -5,6 +5,7 @@ import openai
 from utils.settings import OPENAI_API_KEY, VALIDATION_MODEL
 from utils.logger import logger
 from utils.token_usage_tracker import track_tokens
+from utils.error_handling import handle_agent_error, ErrorSeverity, create_ai_service_error
 
 openai.api_key = OPENAI_API_KEY
 
@@ -23,40 +24,62 @@ class ValidationSecurityAgent(BaseAgent):
 
             if not query or not task:
                 logger.warning("⚠️ Validation agent received empty task or query.")
-                return {"success": False, "error": "Missing task or query."}
+                return handle_agent_error(
+                    self.name(),
+                    ValueError("Missing task or query."),
+                    ErrorSeverity.MEDIUM
+                )
 
             prompt = self._build_validation_prompt(task, query, db_type)
             logger.info("🔒 Validating query for logic and safety.")
 
-            response = openai.ChatCompletion.create(
-                model=VALIDATION_MODEL,
-                messages=[
-                    {"role": "system", "content": "You are a security and logic validator for database queries."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.1
-            )
+            try:
+                response = openai.ChatCompletion.create(
+                    model=VALIDATION_MODEL,
+                    messages=[
+                        {"role": "system", "content": "You are a security and logic validator for database queries."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.1
+                )
 
-            usage = response["usage"]
-            track_tokens("validation_security_agent", VALIDATION_MODEL,
-                         usage["prompt_tokens"], usage["completion_tokens"])
+                usage = response["usage"]
+                track_tokens("validation_security_agent", VALIDATION_MODEL,
+                            usage["prompt_tokens"], usage["completion_tokens"])
 
-            answer = response.choices[0].message.content.strip().lower()
+                answer = response.choices[0].message.content.strip().lower()
 
-            # Safe parsing
-            is_valid = '"valid": true' in answer or '"valid":true' in answer or '"valid": "true"' in answer
+                # Safe parsing
+                is_valid = '"valid": true' in answer or '"valid":true' in answer or '"valid": "true"' in answer
 
-            logger.info(f"✅ Validation result: {is_valid} | Reason: {answer[:120]}")
+                logger.info(f"✅ Validation result: {is_valid} | Reason: {answer[:120]}")
 
-            return {
-                "success": True,
-                "valid": is_valid,
-                "reason": answer
-            }
+                return {
+                    "success": True,
+                    "valid": is_valid,
+                    "reason": answer
+                }
+                
+            except openai.error.OpenAIError as e:
+                # Specific handling for OpenAI API errors
+                logger.error(f"❌ OpenAI API error during validation: {e}")
+                return create_ai_service_error(
+                    message=str(e),
+                    service="openai",
+                    model=VALIDATION_MODEL,
+                    severity=ErrorSeverity.HIGH,
+                    source=self.name(),
+                    original_error=e
+                ).to_dict()
 
         except Exception as e:
             logger.exception("❌ ValidationSecurityAgent failed.")
-            return {"success": False, "error": str(e)}
+            return handle_agent_error(
+                self.name(), 
+                e, 
+                ErrorSeverity.HIGH,  # Using HIGH because this is a security-critical component
+                suggestions=["Check query syntax", "Verify security policies"]
+            )
 
     def _build_validation_prompt(self, task: str, query: str, db_type: str) -> str:
         return (

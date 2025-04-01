@@ -34,7 +34,7 @@ import {
   refreshDatabaseMetadata
 } from "./controllers/schema.controller";
 
-// Health check controllers (New)
+// Health check controllers
 import {
   checkConnectionHealth,
   checkAllConnectionsHealth,
@@ -75,7 +75,7 @@ router.get("/schema/metadata/:id", verifyTokenMiddleware, getDatabaseMetadata);
 router.post("/schema/metadata/:id/refresh", verifyTokenMiddleware, refreshDatabaseMetadata);
 
 // ==============================
-// Health Check Routes (New)
+// Health Check Routes
 // ==============================
 router.get("/health/connection/:id", verifyTokenMiddleware, checkConnectionHealth);
 router.get("/health/connections", verifyTokenMiddleware, checkAllConnectionsHealth);

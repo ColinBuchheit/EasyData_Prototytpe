@@ -7,6 +7,7 @@ import json
 from utils.settings import OPENAI_API_KEY, QUERY_AGENT_MODEL
 from utils.logger import logger
 from utils.token_usage_tracker import track_tokens
+from utils.error_handling import handle_agent_error, ErrorSeverity, create_ai_service_error
 
 openai.api_key = OPENAI_API_KEY
 
@@ -25,47 +26,67 @@ class QueryAgent(BaseAgent):
 
             if not task or not schema:
                 logger.warning("⚠️ QueryAgent missing task or schema input.")
-                return {"success": False, "error": "Missing task or schema input."}
+                return handle_agent_error(
+                    self.name(),
+                    ValueError("Missing task or schema input."),
+                    ErrorSeverity.MEDIUM
+                )
 
             logger.info(f"🧠 QueryAgent building query for DB: {db_type}")
 
             prompt = self._build_prompt(task, schema, db_type)
 
-            response = openai.ChatCompletion.create(
-                model=QUERY_AGENT_MODEL,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": f"You are a highly accurate database assistant. Generate only {db_type.upper()} queries."
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                temperature=0.2
-            )
+            try:
+                response = openai.ChatCompletion.create(
+                    model=QUERY_AGENT_MODEL,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": f"You are a highly accurate database assistant. Generate only {db_type.upper()} queries."
+                        },
+                        {
+                            "role": "user",
+                            "content": prompt
+                        }
+                    ],
+                    temperature=0.2
+                )
 
-            usage = response["usage"]
-            track_tokens("query_agent", QUERY_AGENT_MODEL,
-                         usage["prompt_tokens"], usage["completion_tokens"])
+                usage = response["usage"]
+                track_tokens("query_agent", QUERY_AGENT_MODEL,
+                            usage["prompt_tokens"], usage["completion_tokens"])
 
-            query = response.choices[0].message.content.strip()
+                query = response.choices[0].message.content.strip()
 
-            if not query.lower().startswith("select") and "{" not in query:
-                logger.warning("⚠️ GPT did not return a recognizable query.")
-                return {"success": False, "error": "GPT returned unrecognizable query."}
+                if not query.lower().startswith("select") and "{" not in query:
+                    logger.warning("⚠️ GPT did not return a recognizable query.")
+                    return handle_agent_error(
+                        self.name(),
+                        ValueError("GPT returned unrecognizable query."),
+                        ErrorSeverity.MEDIUM
+                    )
 
-            logger.info(f"✅ QueryAgent generated query: {query[:100]}...")
+                logger.info(f"✅ QueryAgent generated query: {query[:100]}...")
 
-            return {
-                "success": True,
-                "query": query
-            }
+                return {
+                    "success": True,
+                    "query": query
+                }
+            except openai.error.OpenAIError as e:
+                # Specific handling for OpenAI API errors
+                logger.error(f"❌ OpenAI API error: {e}")
+                return create_ai_service_error(
+                    message=str(e),
+                    service="openai",
+                    model=QUERY_AGENT_MODEL,
+                    severity=ErrorSeverity.HIGH,
+                    source=self.name(),
+                    original_error=e
+                ).to_dict()
 
         except Exception as e:
             logger.exception("❌ QueryAgent encountered an error.")
-            return {"success": False, "error": str(e)}
+            return handle_agent_error(self.name(), e, ErrorSeverity.MEDIUM)
 
     def _build_prompt(self, task: str, schema: Dict[str, Any], db_type: str) -> str:
         tables = schema.get("tables", [])
