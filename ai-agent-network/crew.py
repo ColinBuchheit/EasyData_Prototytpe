@@ -76,7 +76,7 @@ def execute_db_query(query: str, db_info: Dict[str, Any], user_id: str) -> Dict[
         return {"error": str(e)}
 
 # === Main Orchestration Function ===
-def run_crew_pipeline(task_description: str, user_id: str, db_info: Dict[str, Any], visualize: bool = True) -> Dict[str, Any]:
+def run_crew_pipeline(task: str, user_id: str, db_info: Dict[str, Any], visualize: bool = True) -> Dict[str, Any]:
     try:
         db = UserDatabase(**db_info)
         adapter = get_adapter_for_db(db.db_type)
@@ -99,14 +99,15 @@ def run_crew_pipeline(task_description: str, user_id: str, db_info: Dict[str, An
 
         query_task = Task(
             identifier="query_task",
-            description=f"Generate a database query for task: {task_description}",
+            description=f"Generate a database query for task: {task}",
             agent=crew_query_agent,
             expected_output="Valid database query string",
             context=[{
                 "description": "User's natural language request and database type",
                 "expected_output": "A valid SQL or NoSQL query",
-                "task": task_description,
-                "db_type": db.db_type
+                "task": task,
+                "db_type": db.db_type,
+                "schema": context.get("schema", {})  # Pass existing schema if available
             }],
             dependencies=[schema_task]
         )
@@ -121,7 +122,7 @@ def run_crew_pipeline(task_description: str, user_id: str, db_info: Dict[str, An
             process="sequential"
         )
 
-        logger.info(f"🚀 Starting CrewAI pipeline for user {user_id} with task: {task_description}")
+        logger.info(f"🚀 Starting CrewAI pipeline for user {user_id} with task: {task}")
         initial_results = crew.kickoff()
 
         schema_output = getattr(initial_results, "schema_task", {})
@@ -147,8 +148,9 @@ def run_crew_pipeline(task_description: str, user_id: str, db_info: Dict[str, An
             context=[{
                 "description": "Validate this query strictly.",
                 "expected_output": 'Strict JSON: { "valid": true|false, "reason": "explanation" }',
-                "task": task_description,
-                "query": query_str
+                "task": task,
+                "query": query_str,
+                "db_type": db.db_type  # Pass db_type to validation agent
             }]
         )
 
@@ -162,30 +164,48 @@ def run_crew_pipeline(task_description: str, user_id: str, db_info: Dict[str, An
         validation_results = validation_crew.kickoff()
         validation_raw = getattr(validation_results, "validation_task", "{}")
 
-        # Optional logging for debug
-        logger.debug(f"🧪 Raw validation output from agent:\n{validation_raw}")
+        # New enhanced validation parsing logic to replace the current block in crew.py
 
-        # Clean and parse output
+        # Clean and parse output (improved parsing logic)
+        logger.debug(f"🧪 Raw validation output type: {type(validation_raw)}, content: {validation_raw}")
+
         if isinstance(validation_raw, str):
-            # Remove ```json or ``` if wrapped
-            validation_raw = re.sub(r"^```(json)?|```$", "", validation_raw.strip(), flags=re.MULTILINE).strip()
+            # More robust regex cleanup to handle various LLM formatting issues
+            clean_validation = re.sub(r'```(?:json)?|```', '', validation_raw, flags=re.MULTILINE)
+            clean_validation = clean_validation.strip()
+            
+            logger.debug(f"Cleaned validation output: {clean_validation}")
+            
             try:
-                validation_output = json.loads(validation_raw)
-            except json.JSONDecodeError:
-                logger.error("❌ Validation agent returned invalid JSON.")
-                return {
-                    "success": False,
-                    "error": "Validation agent did not return valid JSON format.",
-                    "agents_called": agents_called
-                }
+                validation_output = json.loads(clean_validation)
+                logger.debug(f"Successfully parsed validation JSON: {validation_output}")
+            except json.JSONDecodeError as e:
+                logger.error(f"❌ JSON parsing error: {e}, raw content: {clean_validation}")
+                # Attempt fallback parsing using regex
+                valid_match = re.search(r'"valid"\s*:\s*(true|false)', clean_validation, re.IGNORECASE)
+                reason_match = re.search(r'"reason"\s*:\s*"([^"]*)"', clean_validation)
+                
+                is_valid = valid_match and valid_match.group(1).lower() == "true"
+                reason = reason_match.group(1) if reason_match else "No reason available"
+                
+                validation_output = {"valid": is_valid, "reason": reason}
+                logger.debug(f"Created validation output from regex: {validation_output}")
         elif isinstance(validation_raw, dict):
             validation_output = validation_raw
+            logger.debug(f"Validation output is already a dict: {validation_output}")
         else:
-            validation_output = {}
+            logger.error(f"❌ Unexpected validation output type: {type(validation_raw)}")
+            validation_output = {"valid": False, "reason": f"Unexpected validation output format: {type(validation_raw)}"}
 
-        # Safely extract validity and reason
-        is_valid = validation_output.get("valid") is True
-        reason = validation_output.get("reason", "Validation failed with no reason provided.")
+        # Safely extract validity and reason with proper debugging
+        is_valid = bool(validation_output.get("valid", False))
+        reason = validation_output.get("reason", "No reason provided")
+
+        logger.debug(f"Final validation result - valid: {is_valid}, reason: {reason}")
+
+        # Safely extract validity and reason with proper fallbacks
+        is_valid = validation_output.get("valid", False)
+        reason = validation_output.get("reason", "No reason provided")
 
         if not is_valid:
             logger.warning(f"⚠️ Query validation failed for user {user_id}: {reason}")
@@ -230,13 +250,13 @@ def run_crew_pipeline(task_description: str, user_id: str, db_info: Dict[str, An
         if visualize:
             visualization_task = Task(
                 identifier="visualization_task",
-                description=f"Create visualization for query results of: {task_description}",
+                description=f"Create visualization for query results of: {task}",
                 agent=crew_visualization_agent,
                 expected_output="Visualization code and summary",
                 context=[{
                     "description": "Query result and task details to visualize data",
                     "expected_output": "Python chart code and a summary",
-                    "task": task_description,
+                    "task": task,
                     "query_result": db_response
                 }]
             )
@@ -245,13 +265,13 @@ def run_crew_pipeline(task_description: str, user_id: str, db_info: Dict[str, An
 
         chat_task = Task(
             identifier="chat_task",
-            description=f"Explain query results in user-friendly terms: {task_description}",
+            description=f"Explain query results in user-friendly terms: {task}",
             agent=crew_chat_agent,
             expected_output="User-friendly explanation of results",
             context=[{
                 "description": "Query result and user task to explain in plain language",
                 "expected_output": "Natural language summary with friendly tone",
-                "task": task_description,
+                "task": task,
                 "query_result": db_response,
                 "tone": "friendly"
             }]
@@ -277,7 +297,7 @@ def run_crew_pipeline(task_description: str, user_id: str, db_info: Dict[str, An
         append_to_context(user_id, {"chat": chat_output})
 
         set_context(user_id, {
-            "task": task_description,
+            "task": task,
             "query": query_str,
             "response": chat_output.get("message", ""),
             "visual": visualization_output.get("chart_code") if visualization_output else None

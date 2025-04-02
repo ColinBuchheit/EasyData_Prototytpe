@@ -1,8 +1,8 @@
 // src/config/env.ts
 import path from "path";
-import { createContextLogger } from "./logger";
+import basicLogger from "./basiclogger";
 
-const envLogger = createContextLogger("Environment");
+const envLogger = basicLogger;
 
 // List required environment variables
 const REQUIRED_ENV_VARS = [
@@ -13,8 +13,6 @@ const REQUIRED_ENV_VARS = [
   "DB_TYPE",
   "JWT_SECRET",
   "ENCRYPTION_KEY",
-  "AI_AGENT_API",
-  "AI_API_KEY",
   "BACKEND_SECRET",
 ];
 

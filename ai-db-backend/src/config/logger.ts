@@ -1,14 +1,14 @@
 // src/config/logger.ts
 import winston from "winston";
 import DailyRotateFile from "winston-daily-rotate-file";
-import { ENV } from "./env";
+import basicLogger from "./basiclogger";
 
 const { combine, timestamp, printf, colorize, splat, json } = winston.format;
 
 // Check if we should log to console in production
 const LOG_TO_CONSOLE = process.env.LOG_TO_CONSOLE !== 'false';
-const LOG_LEVEL = ENV.LOG_LEVEL || "info";
-const LOG_FORMAT = ENV.LOG_FORMAT || "combined";
+const LOG_LEVEL = process.env.LOG_LEVEL || "info";
+const LOG_FORMAT = process.env.LOG_FORMAT || "combined";
 
 // Define log format
 const logFormat = printf(({ level, message, timestamp, context, ...meta }) => {
@@ -42,7 +42,7 @@ const transports: winston.transport[] = [
 ];
 
 // Add console transport in development or if explicitly enabled
-if (ENV.NODE_ENV !== 'production' || LOG_TO_CONSOLE) {
+if (process.env.NODE_ENV !== 'production' || LOG_TO_CONSOLE) {
   transports.push(new winston.transports.Console({
     format: combine(
       colorize(),
@@ -82,5 +82,8 @@ logger.exceptions.handle(
   new winston.transports.File({ filename: 'logs/exceptions.log' })
 );
 
-// Export the logger
+// For backward compatibility, also export the basic logger
+export { basicLogger };
+
+// Export the main logger
 export default logger;

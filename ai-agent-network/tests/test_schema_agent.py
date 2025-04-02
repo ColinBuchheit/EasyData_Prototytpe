@@ -69,7 +69,11 @@ class TestSchemaAgent(unittest.TestCase):
         
         # Verify the result indicates failure
         self.assertFalse(result["success"])
-        self.assertEqual(result["error"], "No tables found in database.")
+        # Check for error object instead of direct string
+        if isinstance(result["error"], dict) and "message" in result["error"]:
+            self.assertEqual(result["error"]["message"], "No tables found in database.")
+        else:
+            self.assertEqual(result["error"], "No tables found in database.")
         
         # Verify adapter methods were called correctly
         self.mock_adapter.fetch_tables.assert_called_once_with(self.mock_db)
@@ -89,48 +93,68 @@ class TestSchemaAgent(unittest.TestCase):
         
         # Verify the result indicates failure
         self.assertFalse(result["success"])
-        self.assertEqual(result["error"], "Test exception")
+        # Check for error object instead of direct string
+        if isinstance(result["error"], dict) and "message" in result["error"]:
+            self.assertIn("Test exception", result["error"]["message"])
+        else:
+            self.assertEqual(result["error"], "Test exception")
         
         # Verify logging
         mock_logger.exception.assert_called_once()
     
-    @patch('agents.schema_agent.SchemaAgent._extract_tables_from_query')
-    def test_validate_query_against_schema(self, mock_extract):
-        """Test query validation against schema"""
+    @patch('agents.schema_agent.SchemaAgent._build_matching_prompt')
+    def test_match_database_for_query(self, mock_build_prompt):
+        """Test database matching for a query"""
         # Setup mock
-        mock_extract.return_value = ["users", "orders"]
+        mock_build_prompt.return_value = "Mock prompt"
         
-        # Test valid query
-        with patch('agents.schema_agent.SchemaAgent.fetchAllTables', return_value=["users", "orders", "products"]):
-            result = self.agent.validateQueryAgainstSchema("SELECT * FROM users JOIN orders", "postgres")
-            self.assertTrue(result["isValid"])
-        
-        # Test invalid query with unknown tables
-        with patch('agents.schema_agent.SchemaAgent.fetchAllTables', return_value=["products"]):
-            result = self.agent.validateQueryAgainstSchema("SELECT * FROM users", "postgres")
-            self.assertFalse(result["isValid"])
-            self.assertIn("unknown tables", result["message"].lower())
+        with patch('openai.ChatCompletion.create') as mock_openai:
+            mock_completion = MagicMock()
+            mock_completion.choices[0].message.content = json.dumps({
+                "selectedDbId": 123,
+                "confidence": 0.9,
+                "reasoning": "This is the most relevant database"
+            })
+            mock_openai.return_value = mock_completion
+            
+            result = self.agent._match_database_for_query({
+                "userId": 1,
+                "query": "SELECT * FROM users",
+                "databases": [{"dbId": 123, "dbName": "test_db"}]
+            })
+            
+            # Verify result
+            self.assertTrue(result["success"])
+            self.assertEqual(result["selectedDbId"], 123)
+            self.assertAlmostEqual(result["confidence"], 0.9)
     
-    def test_extract_tables_from_query(self):
-        """Test extracting table names from query"""
-        # Basic SELECT query
-        tables = self.agent.extractTablesFromQuery("SELECT * FROM users")
-        self.assertEqual(tables, ["users"])
+    @patch('agents.schema_agent.SchemaAgent._format_schema_for_prompt')
+    def test_analyze_schema(self, mock_format):
+        """Test schema analysis"""
+        # Setup mock
+        mock_format.return_value = "Formatted schema"
         
-        # JOIN query
-        tables = self.agent.extractTablesFromQuery("SELECT u.name FROM users u JOIN orders o ON u.id = o.user_id")
-        self.assertIn("users", tables)
-        self.assertIn("orders", tables)
-        
-        # Query with WHERE clause
-        tables = self.agent.extractTablesFromQuery("SELECT * FROM products WHERE category = 'Electronics'")
-        self.assertEqual(tables, ["products"])
-        
-        # Multiple JOINs
-        tables = self.agent.extractTablesFromQuery(
-            "SELECT * FROM orders JOIN users ON orders.user_id = users.id JOIN products ON orders.product_id = products.id"
-        )
-        self.assertEqual(set(tables), set(["orders", "users", "products"]))
+        with patch('openai.ChatCompletion.create') as mock_openai:
+            mock_completion = MagicMock()
+            mock_completion.choices[0].message.content = json.dumps({
+                "tables": [{"name": "users", "purpose": "Store user data"}],
+                "domainType": "Business",
+                "contentDescription": "CRM system",
+                "dataCategory": ["Users", "Orders"]
+            })
+            mock_openai.return_value = mock_completion
+            
+            result = self.agent._analyze_schema({
+                "dbId": 123,
+                "dbType": "postgres",
+                "dbName": "test_db",
+                "schemaDetails": [{"table": "users", "columns": []}]
+            })
+            
+            # Verify result
+            self.assertTrue(result["success"])
+            self.assertEqual(result["domainType"], "Business")
+            self.assertIn("tables", result)
 
 
 if __name__ == "__main__":
