@@ -3,6 +3,12 @@
 from typing import Dict, Any, Callable
 from crewai import Agent as CrewAgent
 from utils.logger import logger
+import os
+from dotenv import load_dotenv
+load_dotenv()
+
+os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
+os.environ["ANTHROPIC_API_KEY"] = os.getenv("ANTHROPIC_API_KEY", "")
 
 class CrewAIAgentAdapter:
     """

@@ -1,7 +1,7 @@
 # Update: agents/schema_agent.py
 
 from agents.base_agent import BaseAgent
-from db_adapters.db_adapter_router import UserDatabase, BaseDBAdapter
+from db_adapters.base_db_adapters import UserDatabase, BaseDBAdapter
 from typing import Dict, Any, List
 import openai
 import json

@@ -8,6 +8,7 @@ from db_adapters.firebase_adapter import FirebaseAdapter
 from db_adapters.couchdb_adapter import CouchDBAdapter
 from db_adapters.dynamodb_adapter import DynamoDBAdapter
 
+
 def get_adapter_for_db(db_type: str) -> BaseDBAdapter:
     match db_type.lower():
         case "postgres":
@@ -32,20 +33,12 @@ def get_adapter_for_db(db_type: str) -> BaseDBAdapter:
 def check_db_connection(db_info: dict) -> dict:
     """
     Test a database connection and return status
-    
-    Args:
-        db_info: Dictionary containing database connection info
-        
-    Returns:
-        Dictionary with connection status
     """
     try:
-        from db_adapters.base_db_adapters import UserDatabase
+        from db_adapters.base_db_adapters import UserDatabase  # ✅ correct path now
         
         db = UserDatabase(**db_info)
         adapter = get_adapter_for_db(db.db_type)
-        
-        # Try to fetch tables as a simple test
         tables = adapter.fetch_tables(db)
         
         return {

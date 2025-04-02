@@ -2,8 +2,9 @@
 
 import requests
 from typing import Dict, Any, Optional, Union
-from settings import BACKEND_API_URL
+from utils.settings import BACKEND_API_URL
 from utils.logger import logger
+
 
 def fetch_query_result(query: str, db_info: Dict[str, Any], user_id: str) -> Optional[str]:
     """

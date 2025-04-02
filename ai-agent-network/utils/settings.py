@@ -6,8 +6,13 @@ DEBUG = ENV == "development"
 
 # === OpenAI ===
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# === AI Model Configs ===
 QUERY_AGENT_MODEL = os.getenv("QUERY_AGENT_MODEL", "gpt-4-0125-preview")
 ORCHESTRATION_AGENT_MODEL = os.getenv("ORCHESTRATION_AGENT_MODEL", "gpt-4-0125-preview")
+SCHEMA_ANALYSIS_MODEL = os.getenv("SCHEMA_ANALYSIS_MODEL", "claude-3-opus-20240229")
+VALIDATION_MODEL = os.getenv("VALIDATION_MODEL", "claude-3-opus-20240229")
+GPT_MODEL_FOR_CHARTS = os.getenv("GPT_MODEL_FOR_CHARTS", "gpt-4-0125-preview")
+CHAT_MODEL = os.getenv("CHAT_MODEL", "claude-3-sonnet-20240229")
 
 # === Claude / Anthropic (optional)
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")

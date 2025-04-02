@@ -8,6 +8,10 @@ from utils.redis_client import get_redis_client
 from utils.logger import logger
 from db_adapters.db_adapter_router import check_db_connection
 
+from dotenv import load_dotenv
+load_dotenv()
+
+
 app = FastAPI(title="AI Agent Network", version="1.0.0")
 
 # === Enable CORS (for frontend)

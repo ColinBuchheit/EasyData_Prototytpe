@@ -1,7 +1,7 @@
 # utils/redis_client.py
 
 import redis
-from settings import REDIS_URL
+from utils.settings import REDIS_URL
 from utils.logger import logger
 
 # Initialize Redis client
