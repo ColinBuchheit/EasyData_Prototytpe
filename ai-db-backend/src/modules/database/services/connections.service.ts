@@ -349,6 +349,20 @@ export class ConnectionsService {
     }
   }
 
+  static async getAllConnections(): Promise<UserDatabase[]> {
+    try {
+      const result = await pool.query(
+        `SELECT id, user_id, connection_name, db_type, host, port, username, encrypted_password, database_name, 
+        is_connected, created_at, updated_at 
+        FROM user_databases`
+      );
+      return result.rows;
+    } catch (error) {
+      connectionsLogger.error(`Error fetching all databases: ${(error as Error).message}`);
+      throw new Error("Failed to fetch all databases.");
+    }
+  }
+
   /**
    * Fetch schema for a specific table from a user database connection
    */

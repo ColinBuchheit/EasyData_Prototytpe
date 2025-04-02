@@ -10,7 +10,7 @@ import { DatabaseType } from "../models/database.types.model";
 import { 
   UnifiedSchema, 
   convertToUnifiedSchema 
-} from "../models/unified-schema.model";
+} from "../../database/models/unified-schema.model";
 
 const schemaLogger = createContextLogger("SchemaService");
 
