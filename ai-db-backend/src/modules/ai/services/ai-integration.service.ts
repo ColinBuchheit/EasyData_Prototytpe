@@ -2,7 +2,7 @@
 
 import axios from "axios";
 import { createContextLogger } from "../../../config/logger";
-import { AIQueryRequest, AIQueryResponse } from "../models/query.model";
+import { AIQueryRequest, AIQueryResponse } from '../../query/models/query.model';
 import { ConnectionsService } from "../../database/services/connections.service";
 import { SchemaService } from "../../database/services/schema.service";
 import { getRedisClient } from "../../../config/redis";

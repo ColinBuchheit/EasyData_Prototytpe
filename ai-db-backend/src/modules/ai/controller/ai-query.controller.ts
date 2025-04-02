@@ -6,12 +6,11 @@ import { createContextLogger } from "../../../config/logger";
 import { AuthRequest } from "../../../modules/auth/middleware/verification.middleware";
 import { asyncHandler } from "../../../shared/utils/errorHandler";
 import { AIIntegrationService } from "../services/ai-integration.service";
-import { ContextService } from "./services/context.service";
+import { ContextService } from '../../query/services/context.service';
 import { ConnectionsService } from "../../database/services/connections.service";
-import { QueryService } from "../services/query.service";
-import { AIQueryRequest, NaturalLanguageQueryRequest } from "../models/query.model";
-import { sendMessage } from "../middleware/websocket.middleware";
-
+import { QueryService } from '../../query/services/query.service';
+import { AIQueryRequest, NaturalLanguageQueryRequest } from '../../query/models/query.model';
+import { sendMessage } from '../../query/middleware/websocket.middleware';
 const aiQueryLogger = createContextLogger("AIQueryController");
 
 /**
@@ -44,10 +43,13 @@ export const processNaturalLanguageQuery = asyncHandler(async (req: AuthRequest,
   
   // If no dbId provided, detect from query or use current context
   if (!targetDbId) {
-    targetDbId = await ContextService.selectDatabaseForQuery(req.user.id, task);
+    // Fix for type mismatch: explicitly handle null by converting to undefined
+    const selectedDbId = await ContextService.selectDatabaseForQuery(req.user.id, task);
+    targetDbId = selectedDbId ?? undefined;
     
     if (!targetDbId) {
-      targetDbId = await ContextService.getCurrentDatabaseContext(req.user.id);
+      const currentDbId = await ContextService.getCurrentDatabaseContext(req.user.id);
+      targetDbId = currentDbId ?? undefined;
     }
     
     if (!targetDbId) {
@@ -95,9 +97,12 @@ export const processNaturalLanguageQuery = asyncHandler(async (req: AuthRequest,
       });
     }
     
+    // Fix for duplicate 'success' property by destructuring cachedResponse 
+    // and then adding the success property separately
+    const { success, ...restOfResponse } = cachedResponse;
     return res.json({
       success: true,
-      ...cachedResponse,
+      ...restOfResponse,
       cached: true
     });
   }
@@ -144,10 +149,12 @@ export const processNaturalLanguageQuery = asyncHandler(async (req: AuthRequest,
     });
   }
   
+  // Fix for duplicate 'success' property
+  const { success, ...restOfAiResponse } = aiResponse;
   // Return the AI response directly if it already contains results
   return res.json({
     success: true,
-    ...aiResponse
+    ...restOfAiResponse
   });
 });
 
@@ -189,10 +196,13 @@ export async function processWebSocketQuery(socket: ws.WebSocket, userId: number
     let targetDbId = dbId;
     
     if (!targetDbId) {
-      targetDbId = await ContextService.selectDatabaseForQuery(userId, task);
+      // Fix for type mismatch
+      const selectedDbId = await ContextService.selectDatabaseForQuery(userId, task);
+      targetDbId = selectedDbId ?? undefined;
       
       if (!targetDbId) {
-        targetDbId = await ContextService.getCurrentDatabaseContext(userId);
+        const currentDbId = await ContextService.getCurrentDatabaseContext(userId);
+        targetDbId = currentDbId ?? undefined;
       }
       
       if (!targetDbId) {
@@ -246,10 +256,12 @@ export async function processWebSocketQuery(socket: ws.WebSocket, userId: number
         return;
       }
       
+      // Fix for destructuring to avoid duplicate property
+      const { success, ...restOfResponse } = cachedResponse;
       sendMessage(socket, {
         type: "queryResult",
         data: {
-          ...cachedResponse,
+          ...restOfResponse,
           dbId: targetDbId,
           dbName: database.database_name,
           cached: true
@@ -302,11 +314,13 @@ export async function processWebSocketQuery(socket: ws.WebSocket, userId: number
         }
       });
     } else {
+      // Fix for destructuring to avoid duplicate property
+      const { success, ...restOfResponse } = aiResponse;
       // Return AI response directly
       sendMessage(socket, {
         type: "queryResult",
         data: {
-          ...aiResponse,
+          ...restOfResponse,
           dbId: targetDbId,
           dbName: database.database_name
         }
