@@ -81,13 +81,17 @@ const closeDatabase = async () => {
 // ========================
 // ✅ MONGODB CONFIG
 // ========================
-const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/ai_conversations";
+// src/config/db.ts - MongoDB section
+const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/easydatabase";
 let mongoClient: MongoClient | null = null;
 
 const getMongoClient = async (): Promise<MongoClient> => {
   if (mongoClient) {
     return mongoClient;
   }
+  
+  // Add console.log for direct visibility
+  console.log("[MongoDB] Attempting to connect to MongoDB...");
   
   mongoClient = await connectWithRetry(
     async () => {
@@ -97,6 +101,7 @@ const getMongoClient = async (): Promise<MongoClient> => {
       } as any);
       
       await client.connect();
+      console.log("[MongoDB] Connection successful");
       dbLogger.info("MongoDB connected successfully");
       return client;
     },

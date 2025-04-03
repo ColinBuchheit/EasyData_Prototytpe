@@ -1,11 +1,11 @@
 // src/config/logger.ts
 import winston from "winston";
 import DailyRotateFile from "winston-daily-rotate-file";
-import basicLogger from "./basiclogger";
+import path from "path";
 
 const { combine, timestamp, printf, colorize, splat, json } = winston.format;
 
-// Check if we should log to console in production
+// Get environment variables - with safe defaults for early initialization
 const LOG_TO_CONSOLE = process.env.LOG_TO_CONSOLE !== 'false';
 const LOG_LEVEL = process.env.LOG_LEVEL || "info";
 const LOG_FORMAT = process.env.LOG_FORMAT || "combined";
@@ -17,52 +17,63 @@ const logFormat = printf(({ level, message, timestamp, context, ...meta }) => {
   return `${timestamp} ${level}: ${contextStr}${message}${metaStr}`;
 });
 
-// Create file transports
-const errorTransport = new DailyRotateFile({
-  filename: "logs/error-%DATE%.log",
-  datePattern: "YYYY-MM-DD",
-  maxSize: "20m",
-  maxFiles: "14d",
-  zippedArchive: true,
-  level: "error",
-});
+// Use a function to ensure consistent configuration
+function createLoggerInstance() {
+  // Create file transports
+  const errorTransport = new DailyRotateFile({
+    filename: path.join(process.cwd(), "logs/error-%DATE%.log"),
+    datePattern: "YYYY-MM-DD",
+    maxSize: "20m",
+    maxFiles: "14d",
+    zippedArchive: true,
+    level: "error",
+  });
 
-const combinedTransport = new DailyRotateFile({
-  filename: "logs/combined-%DATE%.log",
-  datePattern: "YYYY-MM-DD",
-  maxSize: "50m",
-  maxFiles: "14d",
-  zippedArchive: true,
-});
+  const combinedTransport = new DailyRotateFile({
+    filename: path.join(process.cwd(), "logs/combined-%DATE%.log"),
+    datePattern: "YYYY-MM-DD",
+    maxSize: "50m",
+    maxFiles: "14d",
+    zippedArchive: true,
+  });
 
-// Configure transports
-const transports: winston.transport[] = [
-  errorTransport,
-  combinedTransport
-];
+  // Configure transports
+  const transports: winston.transport[] = [
+    errorTransport,
+    combinedTransport
+  ];
 
-// Add console transport in development or if explicitly enabled
-if (process.env.NODE_ENV !== 'production' || LOG_TO_CONSOLE) {
-  transports.push(new winston.transports.Console({
+  // ALWAYS add console transport in development or if explicitly enabled
+  if (process.env.NODE_ENV !== 'production' || LOG_TO_CONSOLE) {
+    transports.push(new winston.transports.Console({
+      format: combine(
+        colorize(),
+        timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+        logFormat
+      )
+    }));
+  }
+
+  // Create the logger
+  const logger = winston.createLogger({
+    level: LOG_LEVEL,
     format: combine(
-      colorize(),
       timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
-      logFormat
-    )
-  }));
+      splat(),
+      LOG_FORMAT === 'json' ? json() : logFormat
+    ),
+    transports,
+    exitOnError: false
+  });
+
+  // Add an explicit console log to verify initialization
+  console.log(`[Logger] Winston logger initialized at level: ${LOG_LEVEL}`);
+  
+  return logger;
 }
 
-// Create the logger
-const logger = winston.createLogger({
-  level: LOG_LEVEL,
-  format: combine(
-    timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
-    splat(),
-    LOG_FORMAT === 'json' ? json() : logFormat
-  ),
-  transports,
-  exitOnError: false
-});
+// Create the singleton logger instance
+const logger = createLoggerInstance();
 
 // Create context loggers for different components
 export function createContextLogger(context: string) {
@@ -79,11 +90,10 @@ export function createContextLogger(context: string) {
 
 // Handle uncaught exceptions and unhandled rejections
 logger.exceptions.handle(
-  new winston.transports.File({ filename: 'logs/exceptions.log' })
+  new winston.transports.File({ 
+    filename: path.join(process.cwd(), 'logs/exceptions.log') 
+  })
 );
-
-// For backward compatibility, also export the basic logger
-export { basicLogger };
 
 // Export the main logger
 export default logger;

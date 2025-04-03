@@ -5,7 +5,7 @@ import { createContextLogger } from "../../../config/logger";
 import { AIQueryRequest, AIQueryResponse } from "../models/query.model";
 
 const aiLogger = createContextLogger("AIAgentService");
-const AI_AGENT_URL = process.env.AI_AGENT_URL || "http://ai-agent-network:5001";
+const AI_AGENT_URL = process.env.AI_AGENT_API || "http://localhost:5001";
 const AI_API_KEY = process.env.AI_API_KEY || "";
 const REQUEST_TIMEOUT = 60000; // 60 seconds
 
