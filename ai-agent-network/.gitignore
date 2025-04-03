@@ -57,3 +57,11 @@ node_modules/@types/
 node_modules/@types/*
 node_modules/.cache/
 node_modules/.bin/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+
+# Log files
+*.log
+logs/

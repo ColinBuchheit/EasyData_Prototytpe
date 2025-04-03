@@ -1,13 +1,18 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from crew import run_crew_pipeline
 from utils.redis_client import get_redis_client
 from utils.logger import logger
+from db_adapters.db_adapter_router import check_db_connection
 
-app = FastAPI(title="AI Agent Network")
+from dotenv import load_dotenv
+load_dotenv()
+
+
+app = FastAPI(title="AI Agent Network", version="1.0.0")
 
 # === Enable CORS (for frontend)
 app.add_middleware(
@@ -25,9 +30,12 @@ class CrewRequest(BaseModel):
     db_info: Dict[str, Any]
     visualize: bool = True
 
+class DatabaseConnectionRequest(BaseModel):
+    db_info: Dict[str, Any]
+
 
 # === Run the AI Agent Network
-@app.post("/run")
+@app.post("/api/v1/run")
 async def run_pipeline(payload: CrewRequest):
     try:
         logger.info(f"📥 Received pipeline request for user {payload.user_id}")
@@ -44,7 +52,7 @@ async def run_pipeline(payload: CrewRequest):
 
 
 # === Redis Health Check
-@app.get("/health/redis")
+@app.get("/api/v1/health/redis")
 async def redis_health():
     try:
         client = get_redis_client()
@@ -54,7 +62,51 @@ async def redis_health():
         return {"status": "error", "message": str(e)}
 
 
+# === Database Health Check
+@app.post("/api/v1/health/database")
+async def database_health(request: DatabaseConnectionRequest):
+    try:
+        result = check_db_connection(request.db_info)
+        return result
+    except Exception as e:
+        logger.exception("❌ Database health check failed")
+        return {"status": "error", "message": str(e)}
+
+
+# === Service Health Check
+@app.get("/api/v1/health")
+async def service_health():
+    """Overall service health check"""
+    # Check Redis
+    redis_status = "ok"
+    redis_message = "Redis is live"
+    
+    try:
+        client = get_redis_client()
+        client.ping()
+    except Exception as e:
+        redis_status = "error"
+        redis_message = str(e)
+    
+    # You could add more service checks here
+    
+    return {
+        "status": "ok" if redis_status == "ok" else "degraded",
+        "version": "1.0.0",
+        "services": {
+            "redis": {
+                "status": redis_status,
+                "message": redis_message
+            },
+            "api": {
+                "status": "ok",
+                "message": "API is running"
+            }
+        }
+    }
+
+
 # === Root
 @app.get("/")
 async def root():
-    return {"status": "ok", "message": "AI-Agent-Network is running"}
+    return {"status": "ok", "message": "AI-Agent-Network is running", "version": "1.0.0"}

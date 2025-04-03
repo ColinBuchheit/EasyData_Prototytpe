@@ -7,6 +7,8 @@ import json
 from utils.settings import ANTHROPIC_API_KEY, CHAT_MODEL
 from utils.logger import logger
 from utils.token_usage_tracker import track_tokens
+from utils.api_client import APIClient
+from utils.error_handling import handle_agent_error, ErrorSeverity
 
 
 class ChatAgent(BaseAgent):
@@ -48,15 +50,10 @@ Explain this output to a business user in a {tone} tone. Use plain language. Do 
 
         except Exception as e:
             logger.exception("❌ ChatAgent failed to run.")
-            return {"success": False, "error": str(e)}
+            return handle_agent_error(self.name(), e, ErrorSeverity.MEDIUM)
 
     def _ask_claude(self, prompt: str) -> str:
-        headers = {
-            "x-api-key": ANTHROPIC_API_KEY,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json"
-        }
-
+        """Call Claude API with improved error handling and retries"""
         payload = {
             "model": CHAT_MODEL,
             "max_tokens": 512,
@@ -68,14 +65,20 @@ Explain this output to a business user in a {tone} tone. Use plain language. Do 
         }
 
         try:
-            response = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload)
-            response.raise_for_status()
+            # Use the APIClient utility for retries and timeouts
+            response = APIClient.call_anthropic_api(
+                endpoint="messages",
+                payload=payload,
+                api_key=ANTHROPIC_API_KEY,
+                retries=3,
+                timeout=30
+            )
 
             # Claude doesn't return token usage yet — approximate:
             token_guess = len(prompt.split()) + 150
             track_tokens("chat_agent", CHAT_MODEL, token_guess // 2, token_guess // 2)
 
-            content = response.json()["content"][0]["text"]
+            content = response["content"][0]["text"]
             return content
 
         except Exception as e:

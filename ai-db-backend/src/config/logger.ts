@@ -1,114 +1,99 @@
 // src/config/logger.ts
 import winston from "winston";
 import DailyRotateFile from "winston-daily-rotate-file";
-import { Pool } from "pg";
-import { ENV } from "./env";
+import path from "path";
 
-const { combine, timestamp, printf, colorize } = winston.format;
+const { combine, timestamp, printf, colorize, splat, json } = winston.format;
 
-const enableDBLogging = process.env.LOG_DB === "true";
+// Get environment variables - with safe defaults for early initialization
+const LOG_TO_CONSOLE = process.env.LOG_TO_CONSOLE !== 'false';
 const LOG_LEVEL = process.env.LOG_LEVEL || "info";
+const LOG_FORMAT = process.env.LOG_FORMAT || "combined";
 
-const pool = enableDBLogging
-  ? new Pool({
-      host: ENV.DB_HOST,
-      port: ENV.DB_PORT,
-      user: ENV.DB_USER,
-      password: ENV.DB_PASSWORD,
-      database: ENV.DB_DATABASE,
-      max: 5,
-    })
-  : null;
-
-const logFormat = printf(({ level, message, timestamp }) => {
-  return `${timestamp} ${level}: ${message}`;
+// Define log format
+const logFormat = printf(({ level, message, timestamp, context, ...meta }) => {
+  const contextStr = context ? `[${context}] ` : '';
+  const metaStr = Object.keys(meta).length ? ` ${JSON.stringify(meta)}` : '';
+  return `${timestamp} ${level}: ${contextStr}${message}${metaStr}`;
 });
 
-const errorTransport = new DailyRotateFile({
-  filename: "logs/error-%DATE%.log",
-  datePattern: "YYYY-MM-DD",
-  maxSize: "20m",
-  maxFiles: "14d",
-  zippedArchive: true,
-  level: "error",
-});
+// Use a function to ensure consistent configuration
+function createLoggerInstance() {
+  // Create file transports
+  const errorTransport = new DailyRotateFile({
+    filename: path.join(process.cwd(), "logs/error-%DATE%.log"),
+    datePattern: "YYYY-MM-DD",
+    maxSize: "20m",
+    maxFiles: "14d",
+    zippedArchive: true,
+    level: "error",
+  });
 
-const combinedTransport = new DailyRotateFile({
-  filename: "logs/combined-%DATE%.log",
-  datePattern: "YYYY-MM-DD",
-  maxSize: "50m",
-  maxFiles: "14d",
-  zippedArchive: true,
-});
+  const combinedTransport = new DailyRotateFile({
+    filename: path.join(process.cwd(), "logs/combined-%DATE%.log"),
+    datePattern: "YYYY-MM-DD",
+    maxSize: "50m",
+    maxFiles: "14d",
+    zippedArchive: true,
+  });
 
-const logger = winston.createLogger({
-  level: LOG_LEVEL,
-  format: combine(colorize(), timestamp(), logFormat),
-  transports: [
-    new winston.transports.Console(),
+  // Configure transports
+  const transports: winston.transport[] = [
     errorTransport,
-    combinedTransport,
-  ],
-});
+    combinedTransport
+  ];
 
-// ✅ Ensure Log Table Exists
-const ensureLogTable = async () => {
-  if (!enableDBLogging || !pool) return;
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS logs (
-        id SERIAL PRIMARY KEY,
-        level VARCHAR(10),
-        message TEXT,
-        timestamp TIMESTAMP DEFAULT NOW()
-      );
-    `);
-    logger.info("✅ Logs table ensured.");
-  } catch (err) {
-    logger.error(`❌ Failed to ensure logs table: ${(err as Error).message}`);
+  // ALWAYS add console transport in development or if explicitly enabled
+  if (process.env.NODE_ENV !== 'production' || LOG_TO_CONSOLE) {
+    transports.push(new winston.transports.Console({
+      format: combine(
+        colorize(),
+        timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+        logFormat
+      )
+    }));
   }
-};
 
-// ✅ Batch Logging to Database
-const logBuffer: { level: string; message: string }[] = [];
-const BATCH_INTERVAL = 5000;
-const MAX_BATCH_SIZE = 10;
+  // Create the logger
+  const logger = winston.createLogger({
+    level: LOG_LEVEL,
+    format: combine(
+      timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+      splat(),
+      LOG_FORMAT === 'json' ? json() : logFormat
+    ),
+    transports,
+    exitOnError: false
+  });
 
-async function logToDatabase(level: string, message: string) {
-  if (!enableDBLogging || !pool) return;
-  logBuffer.push({ level, message });
-
-  if (logBuffer.length >= MAX_BATCH_SIZE) {
-    await flushLogs();
-  }
+  // Add an explicit console log to verify initialization
+  console.log(`[Logger] Winston logger initialized at level: ${LOG_LEVEL}`);
+  
+  return logger;
 }
 
-async function flushLogs() {
-  if (logBuffer.length === 0 || !pool) return;
-  const logsToInsert = [...logBuffer];
+// Create the singleton logger instance
+const logger = createLoggerInstance();
 
-  try {
-    const values = logsToInsert.map(log => `('${log.level}', '${log.message.replace(/'/g, "''")}', NOW())`).join(", ");
-    await pool.query(`INSERT INTO logs (level, message, timestamp) VALUES ${values}`);
-    logBuffer.length = 0; // ✅ Clear buffer only on success
-  } catch (err) {
-    logger.error(`❌ Failed to batch log messages: ${(err as Error).message}`);
-  }
+// Create context loggers for different components
+export function createContextLogger(context: string) {
+  const contextLogger = {
+    info: (message: string, meta: object = {}) => logger.info(message, { context, ...meta }),
+    warn: (message: string, meta: object = {}) => logger.warn(message, { context, ...meta }),
+    error: (message: string, meta: object = {}) => logger.error(message, { context, ...meta }),
+    debug: (message: string, meta: object = {}) => logger.debug(message, { context, ...meta }),
+    verbose: (message: string, meta: object = {}) => logger.verbose(message, { context, ...meta }),
+  };
+
+  return contextLogger;
 }
 
-setInterval(flushLogs, BATCH_INTERVAL);
+// Handle uncaught exceptions and unhandled rejections
+logger.exceptions.handle(
+  new winston.transports.File({ 
+    filename: path.join(process.cwd(), 'logs/exceptions.log') 
+  })
+);
 
-logger.on("error", (error) => logToDatabase("error", error.message));
-
-process.on("exit", async () => {
-  await flushLogs();
-  if (pool) {
-    await pool.end();
-  }
-  logger.info("✅ Logs flushed before exit.");
-});
-
-ensureLogTable();
-
-export { logger, logToDatabase };
+// Export the main logger
 export default logger;

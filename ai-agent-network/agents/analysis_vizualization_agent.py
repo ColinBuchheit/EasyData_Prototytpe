@@ -13,6 +13,7 @@ from utils.settings import (
 )
 from utils.logger import logger
 from utils.token_usage_tracker import track_tokens
+from utils.error_handling import handle_agent_error, ErrorSeverity, create_ai_service_error
 
 openai.api_key = OPENAI_API_KEY
 
@@ -31,16 +32,36 @@ class AnalysisVisualizationAgent(BaseAgent):
 
             if not query_result:
                 logger.warning("❌ Visualization agent called without query_result")
-                return {"success": False, "error": "Missing query_result for visualization."}
+                return handle_agent_error(
+                    self.name(),
+                    ValueError("Missing query_result for visualization."),
+                    ErrorSeverity.MEDIUM
+                )
 
             logger.info(f"📊 Running visualization for task: {task}")
 
             # Step 1: Ask Claude for chart suggestion + insight
-            chart_info = self._ask_claude_for_chart(task, query_result)
-            visual_type = visual_type_override or chart_info.get("visual_type", "bar")
+            try:
+                chart_info = self._ask_claude_for_chart(task, query_result)
+                visual_type = visual_type_override or chart_info.get("visual_type", "bar")
+            except Exception as e:
+                logger.warning(f"⚠️ Claude chart suggestion failed: {e}")
+                visual_type = visual_type_override or "bar"
+                chart_info = {"visual_type": visual_type, "summary": str(e)}
 
             # Step 2: Use GPT for Python matplotlib code
-            chart_code = self._ask_gpt_for_chart_code(visual_type, query_result)
+            try:
+                chart_code = self._ask_gpt_for_chart_code(visual_type, query_result)
+            except openai.error.OpenAIError as e:
+                logger.error(f"❌ GPT failed to generate chart code: {e}")
+                return create_ai_service_error(
+                    message=f"Failed to generate visualization code: {str(e)}",
+                    service="openai",
+                    model=GPT_MODEL_FOR_CHARTS,
+                    severity=ErrorSeverity.MEDIUM,
+                    source=self.name(),
+                    original_error=e
+                ).to_dict()
 
             logger.info(f"✅ Visualization complete: {visual_type}")
 
@@ -54,7 +75,12 @@ class AnalysisVisualizationAgent(BaseAgent):
 
         except Exception as e:
             logger.exception("❌ Visualization agent failed")
-            return {"success": False, "error": str(e)}
+            return handle_agent_error(
+                self.name(), 
+                e, 
+                ErrorSeverity.MEDIUM,
+                suggestions=["Check if query results are properly formatted", "Verify visualization parameters"]
+            )
 
     def _ask_claude_for_chart(self, task: str, raw_data: str) -> Dict[str, str]:
         headers = {
@@ -100,6 +126,20 @@ Respond ONLY in this JSON format:
             content = response.json()["content"][0]["text"]
             return json.loads(content)
 
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"⚠️ Claude API request failed: {e}")
+            return handle_agent_error(
+                self.name(),
+                e,
+                ErrorSeverity.MEDIUM,
+                suggestions=["Check Anthropic API key", "Verify API endpoint"]
+            )
+        except (ValueError, json.JSONDecodeError) as e:
+            logger.warning(f"⚠️ Failed to parse Claude response: {e}")
+            return {
+                "visual_type": "bar",
+                "summary": f"Failed to get chart recommendation: {str(e)}"
+            }
         except Exception as e:
             logger.warning(f"⚠️ Claude failed, using fallback: {e}")
             return {
@@ -130,6 +170,9 @@ Respond ONLY in this JSON format:
 
             return response.choices[0].message.content.strip()
 
-        except Exception as e:
+        except openai.error.OpenAIError as e:
             logger.error(f"❌ GPT failed to generate chart code: {e}")
-            return "# GPT failed to generate code."
+            raise
+        except Exception as e:
+            logger.error(f"❌ Unexpected error generating chart code: {e}")
+            return "# Failed to generate visualization code."

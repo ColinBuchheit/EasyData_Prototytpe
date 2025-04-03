@@ -11,6 +11,6 @@
     "lib": ["ESNext"],  
     "types": ["node", "ws"]  
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "debug-env.ts"],
   "exclude": ["node_modules/@types/undici-types"]  // ✅ Correct placement
 }

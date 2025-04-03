@@ -1,52 +1,56 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Any
-from utils.logger import logger
+import logging
 
+from utils.logger import logger
 
 class BaseAgent(ABC):
     """
-    Abstract base class for all AI Agents.
-    All agents must implement `.run()` and can override `.name()` and `.info()`.
+    Abstract base class for all agents in the AI Agent Network.
+    Provides common functionality and required interface.
     """
+
+    def name(self) -> str:
+        """Returns the name of the agent (default: class name)"""
+        return self.__class__.__name__
+
+    def info(self) -> Dict[str, Any]:
+        """Returns metadata about the agent"""
+        return {
+            "name": self.name(),
+            "description": self.__doc__ or "No description available",
+            "version": "1.0.0"
+        }
 
     @abstractmethod
     def run(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Main agent logic to be implemented by subclasses.
+        Execute the agent's main functionality.
+        
         Args:
-            input_data (dict): Input context.
+            input_data: Dictionary containing input data for the agent
+            
         Returns:
-            dict: Output with at least a `success` key.
+            Dictionary containing the agent's output with at least a 'success' flag
         """
         pass
 
-    def name(self) -> str:
+    def validate_output(self, output: Any) -> bool:
         """
-        Returns the name of the agent.
-        Default: class name.
-        """
-        return self.__class__.__name__
-
-    def info(self) -> Dict[str, str]:
-        """
-        Returns metadata about the agent.
-        Used for documentation, introspection, or logging.
-        """
-        return {
-            "name": self.name(),
-            "description": "No description provided.",
-            "version": "1.0.0"
-        }
-
-    def validate_output(self, output: Dict[str, Any]) -> bool:
-        """
-        Optional utility: check that `run()` returns at least a success flag.
-        Can be extended in child classes.
+        Validates the output of the agent for expected structure.
+        
+        Args:
+            output: Agent output to validate
+            
+        Returns:
+            True if output is valid, False otherwise
         """
         if not isinstance(output, dict):
-            logger.warning(f"[{self.name()}] Output is not a dict.")
+            logger.warning(f"{self.name()}: Output is not a dictionary")
             return False
+            
         if "success" not in output:
-            logger.warning(f"[{self.name()}] Output missing 'success' key.")
+            logger.warning(f"{self.name()}: Output missing 'success' field")
             return False
+            
         return True
