@@ -2,7 +2,7 @@
 
 import { pool } from "../../../config/db";
 import { createContextLogger } from "../../../config/logger";
-import { PreferenceUpdateData, UserPreferences } from "../models/preference.model";
+import { PreferenceUpdateData, UserPreferences } from "../model/preference.model";
 import { UserService } from "./user.service";
 
 const prefLogger = createContextLogger("PreferenceService");

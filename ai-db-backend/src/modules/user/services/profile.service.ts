@@ -2,7 +2,7 @@
 
 import { pool } from "../../../config/db";
 import { createContextLogger } from "../../../config/logger";
-import { ProfileUpdateData, UserProfile } from "../models/profile.model";
+import { ProfileUpdateData, UserProfile } from "../model/profile.model";
 import { UserService } from "./user.service";
 
 const profileLogger = createContextLogger("ProfileService");
