@@ -1,6 +1,6 @@
 // src/components/chat/ChatInput.tsx
 import React, { useState, useRef, useEffect } from 'react';
-import { useAppDispatch, useAppSelector } from '../../hooks/redux';
+import { useAppDispatch, useAppSelector } from '../../hooks/useRedux';
 import { addMessage } from '../../store/slices/chatSlice';
 import { executeNaturalLanguageQuery } from '../../store/slices/querySlice';
 import { wsSendQuery } from '../../store/middleware/websocketMiddleware';

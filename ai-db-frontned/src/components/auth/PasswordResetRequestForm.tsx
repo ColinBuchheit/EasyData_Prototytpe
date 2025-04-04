@@ -1,7 +1,7 @@
 // src/components/auth/PasswordResetRequestForm.tsx
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useAppDispatch } from '../../hooks/redux';
+import { useAppDispatch} from '../../hooks/useRedux';
 import { addToast } from '../../store/slices/uiSlice';
 import { authApi } from '../../api/auth.api';
 import Input from '../common/Input';

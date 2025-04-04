@@ -1,6 +1,6 @@
 // src/components/auth/ChangePasswordForm.tsx
 import React, { useState } from 'react';
-import { useAppDispatch } from '../../hooks/redux';
+import { useAppDispatch, useAppSelector } from '../../hooks/useRedux';
 import { addToast } from '../../store/slices/uiSlice';
 import { authApi } from '../../api/auth.api';
 import Input from '../common/Input';

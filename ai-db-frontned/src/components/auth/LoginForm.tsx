@@ -1,7 +1,7 @@
 // src/components/auth/LoginForm.tsx
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { useAppDispatch, useAppSelector } from '../../hooks/redux';
+import { useAppDispatch, useAppSelector } from '../../hooks/useRedux';
 import { login, clearError } from '../../store/slices/authSlice';
 import Input from '../common/Input';
 import Button from '../common/Button';

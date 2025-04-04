@@ -1,7 +1,7 @@
 // src/components/auth/RegisterForm.tsx
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { useAppDispatch, useAppSelector } from '../../hooks/redux';
+import { useAppDispatch, useAppSelector } from '../../hooks/useRedux';
 import { register, clearError } from '../../store/slices/authSlice';
 import { addToast } from '../../store/slices/uiSlice';
 import Input from '../common/Input';
