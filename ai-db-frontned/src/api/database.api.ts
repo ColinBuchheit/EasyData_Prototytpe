@@ -6,7 +6,7 @@ import {
   ConnectionTestResult,
   DbSchema,
   DbMetadata 
-} from '../types/database.types';
+} from '../types/database.types.';
 
 export const databaseApi = {
   // Create a new database connection
