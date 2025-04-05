@@ -1,10 +1,11 @@
+// components/settings/Preferences.tsx
 import React, { useState } from 'react';
-import Input from '../common/Input';
+import { Switch } from '@headlessui/react';
 import Button from '../common/Button';
 
 const Preferences: React.FC = () => {
   const [preferences, setPreferences] = useState({
-    defaultQueryMode: 'natural', // 'natural' | 'sql'
+    defaultQueryMode: 'natural',
     autoVisualize: true,
   });
 
@@ -14,7 +15,6 @@ const Preferences: React.FC = () => {
 
   const handleSave = () => {
     console.log('Saved preferences:', preferences);
-    // TODO: Save to backend/localStorage
   };
 
   return (
@@ -33,14 +33,21 @@ const Preferences: React.FC = () => {
         </select>
       </div>
 
-      <div className="flex items-center gap-2">
-        <input
-          type="checkbox"
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-zinc-300">Auto-generate visualizations</span>
+        <Switch
           checked={preferences.autoVisualize}
-          onChange={(e) => handleChange('autoVisualize', e.target.checked)}
-          className="accent-blue-500"
-        />
-        <label className="text-sm text-zinc-300">Auto-generate visualizations</label>
+          onChange={(val) => handleChange('autoVisualize', val)}
+          className={`${
+            preferences.autoVisualize ? 'bg-blue-600' : 'bg-zinc-700'
+          } relative inline-flex h-6 w-11 items-center rounded-full`}
+        >
+          <span
+            className={`${
+              preferences.autoVisualize ? 'translate-x-6' : 'translate-x-1'
+            } inline-block h-4 w-4 transform rounded-full bg-white transition`}
+          />
+        </Switch>
       </div>
 
       <Button onClick={handleSave}>Save Preferences</Button>

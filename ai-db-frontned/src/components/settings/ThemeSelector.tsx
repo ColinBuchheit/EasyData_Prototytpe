@@ -1,25 +1,36 @@
-import React, { useEffect, useState } from 'react';
-import { Sun, Moon } from 'lucide-react';
+// components/settings/ThemeSelector.tsx
+import { Switch } from '@headlessui/react';
+import { Moon, Sun } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
 
 const ThemeSelector: React.FC = () => {
-  const [theme, setTheme] = useState<'light' | 'dark'>('dark');
+  const [enabled, setEnabled] = useState(true); // true = dark
 
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', theme === 'dark');
-  }, [theme]);
-
-  const toggleTheme = () => {
-    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
-  };
+    document.documentElement.classList.toggle('dark', enabled);
+  }, [enabled]);
 
   return (
-    <button
-      onClick={toggleTheme}
-      className="p-2 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-200"
-      aria-label="Toggle theme"
+    <Switch
+      checked={enabled}
+      onChange={setEnabled}
+      className={`relative inline-flex h-8 w-14 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ${
+        enabled ? 'bg-blue-600' : 'bg-zinc-700'
+      }`}
     >
-      {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-    </button>
+      <span className="sr-only">Toggle theme</span>
+      <span
+        className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ${
+          enabled ? 'translate-x-6' : 'translate-x-1'
+        }`}
+      >
+        {enabled ? (
+          <Moon className="w-4 h-4 m-1 text-blue-600" />
+        ) : (
+          <Sun className="w-4 h-4 m-1 text-yellow-400" />
+        )}
+      </span>
+    </Switch>
   );
 };
 
