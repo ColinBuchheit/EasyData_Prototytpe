@@ -1,6 +1,14 @@
 // src/api/index.ts
-import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse, AxiosError } from 'axios';
+import axios, { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse, AxiosError } from 'axios';
 import { getToken, clearTokens } from '../utils/auth.utils';
+
+interface ImportMeta {
+  readonly env: {
+    readonly VITE_API_URL: string;
+    readonly VITE_WS_URL: string;
+    readonly [key: string]: string | undefined;
+  };
+}
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
@@ -15,7 +23,7 @@ const apiClient: AxiosInstance = axios.create({
 
 // Request interceptor for adding token
 apiClient.interceptors.request.use(
-  (config: AxiosRequestConfig) => {
+  (config: InternalAxiosRequestConfig) => {
     const token = getToken();
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;
@@ -31,7 +39,7 @@ apiClient.interceptors.request.use(
 apiClient.interceptors.response.use(
   (response: AxiosResponse) => response,
   async (error: AxiosError) => {
-    const originalRequest = error.config as AxiosRequestConfig & { _retry?: boolean };
+    const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
     
     // Handle 401 Unauthorized errors (token expired)
     if (error.response?.status === 401 && !originalRequest._retry) {

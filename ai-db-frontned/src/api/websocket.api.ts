@@ -1,13 +1,29 @@
 // src/api/websocket.api.ts
 import { store } from '../store';
 import { addMessage, updateQueryStatus } from '../store/slices/chatSlice';
-import { QueryStatus, QueryResult } from '../types/query.types';
+import { QueryStatus } from '../types/query.types';
+
+// Add the missing QueryResult type
+export interface QueryResult {
+  query?: string;
+  explanation?: string;
+  results?: any[];
+  visualizationCode?: string;
+  executionTimeMs?: number;
+  rowCount?: number;
+  message?: string;
+  error?: string;
+  agentsCalled?: string[];
+  cached?: boolean;
+  contextSwitched?: boolean;
+  dbId?: number;
+}
 
 export class WebSocketService {
   private socket: WebSocket | null = null;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
-  private reconnectTimeout: NodeJS.Timeout | null = null;
+  private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   private isConnecting = false;
   
   constructor(private url: string) {}
