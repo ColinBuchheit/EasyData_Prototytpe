@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../hooks/useRedux';
 import { login, clearError } from '../../store/slices/authSlice';
+import { LoginResponse } from '../../types/auth.types';
 import Input from '../common/Input';
 import Button from '../common/Button';
 
@@ -68,7 +69,9 @@ const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
     }
 
     try {
-      const result = await dispatch(login(formData)).unwrap();
+      // Cast to any to bypass TypeScript's type checking for the dispatch call
+      const result = await (dispatch as any)(login(formData)).unwrap();
+      
       if (result.success) {
         if (onSuccess) {
           onSuccess();
@@ -142,7 +145,7 @@ const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
         
         <Button
           type="submit"
-          variant="primary"
+          variant="default"
           isLoading={loading}
           className="w-full"
         >

@@ -1,7 +1,9 @@
 import React, { useRef, useEffect } from 'react';
 import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
+import ProgressUpdates from './ProgressUpdates';
 import { useAppSelector } from '../../hooks/useRedux';
+import { Message } from '../../types/chat.types';
 
 const ChatContainer: React.FC = () => {
   const messages = useAppSelector((state) => state.chat.messages);
@@ -28,6 +30,9 @@ const ChatContainer: React.FC = () => {
             <ChatMessage key={msg.id} message={msg} />
           ))
         )}
+        
+        {/* Progress updates will show here when a query is being processed */}
+        <ProgressUpdates />
       </div>
 
       <div className="border-t border-zinc-800 bg-zinc-900 p-4">

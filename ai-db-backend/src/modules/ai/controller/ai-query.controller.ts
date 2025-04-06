@@ -159,6 +159,21 @@ export const processNaturalLanguageQuery = asyncHandler(async (req: AuthRequest,
 });
 
 /**
+ * Send progress update to client via WebSocket
+ */
+function sendProgressUpdate(socket: ws.WebSocket, type: string, message: string, details?: any) {
+  sendMessage(socket, {
+    type: "progressUpdate",
+    data: {
+      type,
+      message,
+      details,
+      timestamp: new Date().toISOString()
+    }
+  });
+}
+
+/**
  * Process a WebSocket query
  */
 export async function processWebSocketQuery(socket: ws.WebSocket, userId: number, data: any) {
@@ -181,7 +196,11 @@ export async function processWebSocketQuery(socket: ws.WebSocket, userId: number
       message: "Processing your query..."
     });
     
+    // First progress update
+    sendProgressUpdate(socket, "thinking", "Analyzing your question...");
+    
     // Check for context switching
+    sendProgressUpdate(socket, "decision", "Checking if we need to switch databases...");
     const contextSwitch = await ContextService.detectContextSwitch(userId, task);
     if (contextSwitch.switched) {
       sendMessage(socket, {
@@ -215,6 +234,7 @@ export async function processWebSocketQuery(socket: ws.WebSocket, userId: number
     }
     
     // Get the database
+    sendProgressUpdate(socket, "decision", `Connecting to database...`);
     const database = await ConnectionsService.getConnectionById(userId, targetDbId);
     if (!database) {
       sendMessage(socket, {
@@ -224,7 +244,10 @@ export async function processWebSocketQuery(socket: ws.WebSocket, userId: number
       return;
     }
     
+    sendProgressUpdate(socket, "decision", `Connected to ${database.database_name} database`);
+    
     // Check for cached response
+    sendProgressUpdate(socket, "decision", "Checking if I've answered this question before...");
     const cachedResponse = await AIIntegrationService.getCachedQueryResponse(userId, task);
     if (cachedResponse && !data.refresh) {
       aiQueryLogger.info(`Using cached response for WebSocket task: ${task.substring(0, 50)}...`);
@@ -271,6 +294,13 @@ export async function processWebSocketQuery(socket: ws.WebSocket, userId: number
     }
     
     // Process with AI
+    sendProgressUpdate(socket, "schema_analysis", "Analyzing database schema...");
+    
+    // Short delay to show progress to the user
+    await new Promise(resolve => setTimeout(resolve, 800));
+    
+    sendProgressUpdate(socket, "thinking", "Thinking about how to solve this...");
+    
     const aiRequest: AIQueryRequest = {
       userId,
       dbId: targetDbId,
@@ -279,6 +309,11 @@ export async function processWebSocketQuery(socket: ws.WebSocket, userId: number
       task,
       options: { visualize }
     };
+    
+    // Short delay to show progress to the user
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    sendProgressUpdate(socket, "query_generation", "Generating SQL query...");
     
     const aiResponse = await AIIntegrationService.processQuery(aiRequest);
     
@@ -295,10 +330,21 @@ export async function processWebSocketQuery(socket: ws.WebSocket, userId: number
     
     // Execute query if needed
     if (aiResponse.query && !aiResponse.results) {
+      sendProgressUpdate(socket, "query_execution", "Executing query...", {
+        query: aiResponse.query
+      });
+      
       const queryResult = await QueryService.executeQuery(userId, {
         dbId: targetDbId,
         query: aiResponse.query
       });
+      
+      sendProgressUpdate(socket, "result_analysis", "Analyzing results...");
+      
+      // If visualization is enabled
+      if (visualize && queryResult.rows && queryResult.rows.length > 0) {
+        sendProgressUpdate(socket, "visualization", "Creating visualization...");
+      }
       
       sendMessage(socket, {
         type: "queryResult",

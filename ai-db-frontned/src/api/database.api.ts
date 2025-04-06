@@ -6,11 +6,13 @@ import {
   ConnectionTestResult,
   DbSchema,
   DbMetadata 
-} from '../types/database.types.';
+} from '../types/database.types';
 
 export const databaseApi = {
   // Create a new database connection
-  createConnection: async (connectionData: DbConnectionRequest): Promise<{ success: boolean; data: DbConnection }> => {
+  createConnection: async (connectionData: DbConnectionRequest): Promise<{
+    message: string; success: boolean; data: DbConnection 
+}> => {
     const response = await apiClient.post('/database/connections', connectionData);
     return response.data;
   },
@@ -22,7 +24,9 @@ export const databaseApi = {
   },
   
   // Get all user's database connections
-  getUserConnections: async (): Promise<{ success: boolean; data: DbConnection[] }> => {
+  getUserConnections: async (): Promise<{
+    message: string; success: boolean; data: DbConnection[] 
+}> => {
     const response = await apiClient.get('/database/connections');
     return response.data;
   },
@@ -40,13 +44,17 @@ export const databaseApi = {
   },
   
   // Delete a database connection
-  deleteConnection: async (id: number): Promise<{ success: boolean }> => {
+  deleteConnection: async (id: number): Promise<{
+    message: string; success: boolean 
+}> => {
     const response = await apiClient.delete(`/database/connections/${id}`);
     return response.data;
   },
   
   // Get database schema metadata
-  getDatabaseMetadata: async (id: number): Promise<{ success: boolean; data: DbMetadata }> => {
+  getDatabaseMetadata: async (id: number): Promise<{
+    message: string; success: boolean; data: DbMetadata 
+}> => {
     const response = await apiClient.get(`/database/schema/metadata/${id}`);
     return response.data;
   },
@@ -58,13 +66,17 @@ export const databaseApi = {
   },
   
   // Get database health status
-  checkConnectionHealth: async (id: number): Promise<{ success: boolean; status: any }> => {
+  checkConnectionHealth: async (id: number): Promise<{
+    message: string; success: boolean; status: any 
+}> => {
     const response = await apiClient.get(`/database/health/connection/${id}`);
     return response.data;
   },
   
   // Get unified schema (enhanced schema with relationships, etc)
-  getUnifiedSchema: async (id: number): Promise<{ success: boolean; schema: DbSchema }> => {
+  getUnifiedSchema: async (id: number): Promise<{
+    message: string; success: boolean; schema: DbSchema 
+}> => {
     const response = await apiClient.get(`/database/schema/unified/${id}`);
     return response.data;
   }

@@ -61,6 +61,7 @@ const uiSlice = createSlice({
       state.modalContent = null;
     },
     addToast: (state, action: PayloadAction<{
+      [x: string]: any;
       type: 'success' | 'error' | 'info' | 'warning';
       message: string;
       duration?: number;

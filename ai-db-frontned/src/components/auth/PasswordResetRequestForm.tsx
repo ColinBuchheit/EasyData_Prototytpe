@@ -51,11 +51,17 @@ const PasswordResetRequestForm: React.FC<PasswordResetRequestFormProps> = ({ onS
     setLoading(true);
 
     try {
-      const response = await authApi.requestPasswordReset(email);
+      await authApi.requestPasswordReset(email);
       
       // Even if email doesn't exist, the API returns success for security reasons
       // We treat all responses as successful
       setSubmitted(true);
+      
+      // Show a toast notification
+      dispatch(addToast({
+        type: 'success',
+        message: 'Password reset instructions sent to your email'
+      }));
       
       if (onSuccess) {
         onSuccess();
@@ -134,7 +140,7 @@ const PasswordResetRequestForm: React.FC<PasswordResetRequestFormProps> = ({ onS
         
         <Button
           type="submit"
-          variant="primary"
+          variant="default"
           isLoading={loading}
           className="w-full mt-4"
         >

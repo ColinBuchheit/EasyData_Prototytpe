@@ -27,7 +27,9 @@ export const queryApi = {
   },
   
   // Get query history
-  getQueryHistory: async (limit: number = 10, dbId?: number): Promise<{ success: boolean; history: QueryHistory[] }> => {
+  getQueryHistory: async (limit: number = 10, dbId?: number): Promise<{
+    message: string; success: boolean; history: QueryHistory[] 
+}> => {
     const params = new URLSearchParams();
     params.append('limit', limit.toString());
     if (dbId) {
@@ -39,13 +41,17 @@ export const queryApi = {
   },
   
   // Get current database context
-  getCurrentContext: async (): Promise<{ success: boolean; context: any }> => {
+  getCurrentContext: async (): Promise<{
+    message: string; success: boolean; context: any 
+}> => {
     const response = await apiClient.get('/query/context');
     return response.data;
   },
   
   // Set current database context
-  setCurrentContext: async (dbId: number): Promise<{ success: boolean }> => {
+  setCurrentContext: async (dbId: number): Promise<{
+    message: string; success: boolean 
+}> => {
     const response = await apiClient.post('/query/context', { dbId });
     return response.data;
   },

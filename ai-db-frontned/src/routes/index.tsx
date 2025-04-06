@@ -81,7 +81,7 @@ export const AppRoutes: React.FC = () => {
       path: '/',
       element: (
         <AuthGuard>
-          <MainLayout />
+          <MainLayout children={undefined} />
         </AuthGuard>
       ),
       children: [

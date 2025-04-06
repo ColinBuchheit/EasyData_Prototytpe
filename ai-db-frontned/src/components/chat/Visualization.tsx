@@ -13,8 +13,6 @@ import {
   RadialLinearScale,
 } from 'chart.js';
 import { Bar, Line, Pie, Doughnut, Radar } from 'react-chartjs-2';
-import { cn } from '../../utils/format.utils';
-
 ChartJS.register(
   CategoryScale,
   LinearScale,

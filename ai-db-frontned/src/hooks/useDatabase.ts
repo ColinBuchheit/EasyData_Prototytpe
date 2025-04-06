@@ -10,7 +10,7 @@ import {
   deleteConnection,
   checkConnectionHealth
 } from '../store/slices/databaseSlice';
-import { DbConnectionRequest } from '../types/database.types.';
+import { DbConnectionRequest } from '../types/database.types';
 import { addToast } from '../store/slices/uiSlice';
 
 export const useDatabase = () => {

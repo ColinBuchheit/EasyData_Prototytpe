@@ -4,7 +4,7 @@ import Input from '../common/Input';
 import Button from '../common/Button';
 import { Listbox } from '@headlessui/react';
 import { Check, ChevronsUpDown } from 'lucide-react';
-import { DatabaseType } from '../../types/database.types';
+import { DatabaseType } from '../../types/database.types.ts';
 
 interface ConnectionFormProps {
   onSubmit: (data: any) => void;
@@ -28,7 +28,7 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({ onSubmit, initial }) =>
   );
 
   const handleChange = (field: string, value: string | number) => {
-    setForm((prev) => ({ ...prev, [field]: value }));
+    setForm((prev: any) => ({ ...prev, [field]: value }));
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -50,7 +50,7 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({ onSubmit, initial }) =>
           <div className="relative">
             <Listbox.Button className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 text-zinc-100 rounded-md flex justify-between items-center">
               {form.db_type}
-              <ChevronUpDown className="w-4 h-4" />
+              <ChevronsUpDown className="w-4 h-4" />
             </Listbox.Button>
             <Listbox.Options className="absolute mt-1 w-full bg-zinc-900 border border-zinc-700 rounded-md shadow-lg z-10">
               {dbTypes.map((type) => (

@@ -1,7 +1,11 @@
 // src/api/websocket.api.ts
 import { store } from '../store';
 import { addMessage, updateQueryStatus } from '../store/slices/chatSlice';
-import { QueryStatus } from '../types/query.types';
+import { addProgressUpdate } from '../store/slices/querySlice';
+import { 
+  QueryStatus, 
+  ProgressUpdateType 
+} from '../types/query.types';
 
 // Add the missing QueryResult type
 export interface QueryResult {
@@ -128,6 +132,17 @@ export class WebSocketService {
           store.dispatch(updateQueryStatus({ status: QueryStatus.PROCESSING, message: message.message }));
           break;
         
+        case 'progressUpdate':
+          // Handle real-time progress updates
+          if (message.data && typeof message.data.type === 'string') {
+            store.dispatch(addProgressUpdate({
+              type: message.data.type as ProgressUpdateType,
+              message: message.data.message || 'Processing...',
+              details: message.data.details
+            }));
+          }
+          break;
+          
         case 'queryResult':
           store.dispatch(addMessage({
             id: Date.now().toString(),

@@ -252,7 +252,7 @@ const PasswordResetForm: React.FC<PasswordResetFormProps> = ({ onSuccess }) => {
         
         <Button
           type="submit"
-          variant="primary"
+          variant="default"
           isLoading={loading}
           className="w-full mt-4"
         >

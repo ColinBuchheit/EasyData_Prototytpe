@@ -41,7 +41,9 @@ export const authApi = {
   },
   
   // Reset password with token
-  resetPassword: async (data: PasswordResetRequest): Promise<{ success: boolean }> => {
+  resetPassword: async (data: PasswordResetRequest): Promise<{
+    message: string; success: boolean 
+}> => {
     const response = await apiClient.post('/auth/reset-password', data);
     return response.data;
   },

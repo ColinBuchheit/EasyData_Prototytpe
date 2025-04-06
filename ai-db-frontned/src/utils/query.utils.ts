@@ -1,5 +1,5 @@
 // src/utils/query.utils.ts
-import { DatabaseType } from '../types/database.types.';
+import { DatabaseType } from '../types/database.types';
 
 /**
  * Extract tables from SQL query

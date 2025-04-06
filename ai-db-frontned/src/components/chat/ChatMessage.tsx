@@ -31,12 +31,12 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
         <StatusIndicator status="stream" message={message.content} />
       ) : (
         <ReactMarkdown
-          className="prose prose-invert max-w-none"
           components={{
-            code({ node, inline, className, children, ...props }) {
+            code({ node, className, children, ...props }: any) {
               const language = className?.replace('language-', '') || 'sql';
+              const isInline = props.inline;
 
-              return !inline ? (
+              return !isInline ? (
                 <CodeBlock language={language} value={String(children).trim()} />
               ) : (
                 <code

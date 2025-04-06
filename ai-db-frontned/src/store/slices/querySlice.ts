@@ -7,13 +7,16 @@ import {
   NaturalLanguageQueryRequest,
   QueryStatus,
   QueryContext,
-  QueryHistory
+  QueryHistory,
+  ProgressUpdateType,
+  ProgressUpdate
 } from '../../types/query.types';
 
 const initialState: QueryState = {
   history: [],
   currentContext: null,
   status: QueryStatus.IDLE,
+  progressUpdates: [], // Add to store streaming updates
   lastError: null,
   loading: false,
 };
@@ -116,9 +119,33 @@ const querySlice = createSlice({
       if (action.payload.status === QueryStatus.FAILED) {
         state.lastError = action.payload.message || 'Query execution failed';
       }
+
+      // Reset progress updates when starting a new query
+      if (action.payload.status === QueryStatus.PROCESSING) {
+        state.progressUpdates = [];
+      }
     },
     clearError: (state) => {
       state.lastError = null;
+    },
+    addProgressUpdate: (state, action: PayloadAction<{ 
+      type: ProgressUpdateType;
+      message: string;
+      details?: any;
+    }>) => {
+      const update: ProgressUpdate = {
+        ...action.payload,
+        timestamp: new Date().toISOString()
+      };
+      state.progressUpdates.push(update);
+      
+      // Set status to streaming to indicate real-time updates are being shown
+      if (state.status === QueryStatus.PROCESSING) {
+        state.status = QueryStatus.STREAMING;
+      }
+    },
+    clearProgressUpdates: (state) => {
+      state.progressUpdates = [];
     },
   },
   extraReducers: (builder) => {
@@ -180,5 +207,5 @@ const querySlice = createSlice({
   },
 });
 
-export const { updateQueryStatus, clearError } = querySlice.actions;
+export const { updateQueryStatus, clearError, addProgressUpdate, clearProgressUpdates } = querySlice.actions;
 export default querySlice.reducer;

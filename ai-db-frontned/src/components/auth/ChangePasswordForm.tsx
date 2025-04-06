@@ -191,7 +191,7 @@ const ChangePasswordForm: React.FC<ChangePasswordFormProps> = ({ onSuccess }) =>
         
         <Button
           type="submit"
-          variant="primary"
+          variant="default"
           isLoading={loading}
           className="w-full mt-4"
         >

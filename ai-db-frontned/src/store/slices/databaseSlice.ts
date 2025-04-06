@@ -8,7 +8,7 @@ import {
   DbSchema,
   DbMetadata,
   ConnectionHealthStatus
-} from '../../types/database.types.';
+} from '../../types/database.types';
 
 const initialState: DatabaseState = {
   connections: [],

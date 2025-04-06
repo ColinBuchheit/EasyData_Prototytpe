@@ -2,12 +2,15 @@
 import axios, { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse, AxiosError } from 'axios';
 import { getToken, clearTokens } from '../utils/auth.utils';
 
-interface ImportMeta {
-  readonly env: {
-    readonly VITE_API_URL: string;
-    readonly VITE_WS_URL: string;
-    readonly [key: string]: string | undefined;
-  };
+// Augment the ImportMeta interface from Vite
+declare global {
+  interface ImportMeta {
+    readonly env: {
+      readonly VITE_API_URL: string;
+      readonly VITE_WS_URL: string;
+      readonly [key: string]: string | undefined;
+    };
+  }
 }
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
