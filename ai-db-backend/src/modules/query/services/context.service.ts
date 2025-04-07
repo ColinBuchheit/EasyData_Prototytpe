@@ -1,14 +1,21 @@
 // src/modules/query/services/context.service.ts
 
 import { createContextLogger } from "../../../config/logger";
-import { getRedisClient, getMongoClient } from "../../../config/db";
+import { getMongoClient } from "../../../config/db";
 import { ConnectionsService } from "../../database/services/connections.service";
 import { SchemaService } from "../../database/services/schema.service";
 import { ContextSwitchResult, DatabaseMatch, QueryContext } from "../models/context.model";
+import { getRedisClient } from "../../../config/redis";
+
 
 const contextLogger = createContextLogger("ContextService");
 
 export class ContextService {
+  /**
+   * Detects which database to use based on query content
+   */
+  // src/modules/query/services/context.service.ts (partial with fixes)
+
   /**
    * Detects which database to use based on query content
    */

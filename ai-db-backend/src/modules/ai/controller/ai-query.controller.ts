@@ -1,4 +1,4 @@
-// src/modules/query/controllers/ai-query.controller.ts
+// src/modules/ai/controller/ai-query.controller.ts
 
 import { Response } from "express";
 import * as ws from "ws";
@@ -11,6 +11,7 @@ import { ConnectionsService } from "../../database/services/connections.service"
 import { QueryService } from '../../query/services/query.service';
 import { AIQueryRequest, NaturalLanguageQueryRequest } from '../../query/models/query.model';
 import { sendMessage } from '../../query/middleware/websocket.middleware';
+
 const aiQueryLogger = createContextLogger("AIQueryController");
 
 /**
@@ -21,7 +22,7 @@ export const processNaturalLanguageQuery = asyncHandler(async (req: AuthRequest,
     return res.status(401).json({ success: false, message: "Unauthorized: User not authenticated" });
   }
 
-  const { task, dbId, visualize = true }: NaturalLanguageQueryRequest = req.body;
+  const { task, dbId: requestDbId, visualize = true }: NaturalLanguageQueryRequest = req.body;
   
   if (!task || typeof task !== "string") {
     return res.status(400).json({ success: false, message: "Task description is required" });
@@ -29,30 +30,30 @@ export const processNaturalLanguageQuery = asyncHandler(async (req: AuthRequest,
   
   // First check for explicit context switching
   const contextSwitch = await ContextService.detectContextSwitch(req.user.id, task);
-  if (contextSwitch.switched) {
+  if (contextSwitch.switched && contextSwitch.dbId !== undefined) {
     return res.json({
       success: true,
-      message: contextSwitch.message,
+      message: contextSwitch.message || "Switched database context",
       dbId: contextSwitch.dbId,
       contextSwitched: true
     });
   }
   
-  // Determine which database to use
-  let targetDbId = dbId;
+  // Determine which database to use - explicitly handle null and undefined
+  let targetDbId = requestDbId;
   
   // If no dbId provided, detect from query or use current context
-  if (!targetDbId) {
-    // Fix for type mismatch: explicitly handle null by converting to undefined
+  if (targetDbId === undefined) {
     const selectedDbId = await ContextService.selectDatabaseForQuery(req.user.id, task);
+    // Use null coalescing operator to explicitly convert null to undefined
     targetDbId = selectedDbId ?? undefined;
     
-    if (!targetDbId) {
+    if (targetDbId === undefined) {
       const currentDbId = await ContextService.getCurrentDatabaseContext(req.user.id);
       targetDbId = currentDbId ?? undefined;
     }
     
-    if (!targetDbId) {
+    if (targetDbId === undefined) {
       return res.status(400).json({
         success: false,
         message: "Could not determine which database to use. Please specify a database."
@@ -88,10 +89,10 @@ export const processNaturalLanguageQuery = asyncHandler(async (req: AuthRequest,
         success: true,
         query: cachedResponse.query,
         explanation: cachedResponse.explanation,
-        results: queryResult.rows,
+        results: queryResult.rows || [],
         visualizationCode: cachedResponse.visualizationCode,
-        executionTimeMs: queryResult.executionTimeMs,
-        rowCount: queryResult.rowCount,
+        executionTimeMs: queryResult.executionTimeMs || 0,
+        rowCount: queryResult.rowCount || 0,
         message: "Query executed successfully (cached)",
         cached: true
       });
@@ -141,10 +142,10 @@ export const processNaturalLanguageQuery = asyncHandler(async (req: AuthRequest,
       success: true,
       query: aiResponse.query,
       explanation: aiResponse.explanation,
-      results: queryResult.rows,
+      results: queryResult.rows || [],
       visualizationCode: aiResponse.visualizationCode,
-      executionTimeMs: queryResult.executionTimeMs,
-      rowCount: queryResult.rowCount,
+      executionTimeMs: queryResult.executionTimeMs || 0,
+      rowCount: queryResult.rowCount || 0,
       message: "Query executed successfully"
     });
   }
@@ -180,7 +181,7 @@ export async function processWebSocketQuery(socket: ws.WebSocket, userId: number
   try {
     aiQueryLogger.info(`Processing WebSocket query for user ${userId}`);
     
-    const { task, dbId, visualize = true } = data;
+    const { task, dbId: requestDbId, visualize = true } = data;
     
     if (!task) {
       sendMessage(socket, {
@@ -202,29 +203,29 @@ export async function processWebSocketQuery(socket: ws.WebSocket, userId: number
     // Check for context switching
     sendProgressUpdate(socket, "decision", "Checking if we need to switch databases...");
     const contextSwitch = await ContextService.detectContextSwitch(userId, task);
-    if (contextSwitch.switched) {
+    if (contextSwitch.switched && contextSwitch.dbId !== undefined) {
       sendMessage(socket, {
         type: "contextSwitch",
-        message: contextSwitch.message,
+        message: contextSwitch.message || "Switched database context",
         data: { dbId: contextSwitch.dbId }
       });
       return;
     }
     
     // Determine database
-    let targetDbId = dbId;
+    let targetDbId = requestDbId;
     
-    if (!targetDbId) {
+    if (targetDbId === undefined) {
       // Fix for type mismatch
       const selectedDbId = await ContextService.selectDatabaseForQuery(userId, task);
       targetDbId = selectedDbId ?? undefined;
       
-      if (!targetDbId) {
+      if (targetDbId === undefined) {
         const currentDbId = await ContextService.getCurrentDatabaseContext(userId);
         targetDbId = currentDbId ?? undefined;
       }
       
-      if (!targetDbId) {
+      if (targetDbId === undefined) {
         sendMessage(socket, {
           type: "error",
           message: "Could not determine which database to use. Please specify a database."
@@ -244,7 +245,7 @@ export async function processWebSocketQuery(socket: ws.WebSocket, userId: number
       return;
     }
     
-    sendProgressUpdate(socket, "decision", `Connected to ${database.database_name} database`);
+    sendProgressUpdate(socket, "decision", `Connected to ${database.database_name || "database"}`);
     
     // Check for cached response
     sendProgressUpdate(socket, "decision", "Checking if I've answered this question before...");
@@ -267,12 +268,12 @@ export async function processWebSocketQuery(socket: ws.WebSocket, userId: number
           data: {
             query: cachedResponse.query,
             explanation: cachedResponse.explanation,
-            results: queryResult.rows,
+            results: queryResult.rows || [],
             visualizationCode: cachedResponse.visualizationCode,
-            executionTimeMs: queryResult.executionTimeMs,
-            rowCount: queryResult.rowCount,
+            executionTimeMs: queryResult.executionTimeMs || 0,
+            rowCount: queryResult.rowCount || 0,
             dbId: targetDbId,
-            dbName: database.database_name,
+            dbName: database.database_name || "database",
             cached: true
           }
         });
@@ -286,7 +287,7 @@ export async function processWebSocketQuery(socket: ws.WebSocket, userId: number
         data: {
           ...restOfResponse,
           dbId: targetDbId,
-          dbName: database.database_name,
+          dbName: database.database_name || "database",
           cached: true
         }
       });
@@ -305,7 +306,7 @@ export async function processWebSocketQuery(socket: ws.WebSocket, userId: number
       userId,
       dbId: targetDbId,
       dbType: database.db_type,
-      dbName: database.database_name,
+      dbName: database.database_name || "",
       task,
       options: { visualize }
     };
@@ -351,12 +352,12 @@ export async function processWebSocketQuery(socket: ws.WebSocket, userId: number
         data: {
           query: aiResponse.query,
           explanation: aiResponse.explanation,
-          results: queryResult.rows,
+          results: queryResult.rows || [],
           visualizationCode: aiResponse.visualizationCode,
-          executionTimeMs: queryResult.executionTimeMs,
-          rowCount: queryResult.rowCount,
+          executionTimeMs: queryResult.executionTimeMs || 0,
+          rowCount: queryResult.rowCount || 0,
           dbId: targetDbId,
-          dbName: database.database_name
+          dbName: database.database_name || "database"
         }
       });
     } else {
@@ -368,7 +369,7 @@ export async function processWebSocketQuery(socket: ws.WebSocket, userId: number
         data: {
           ...restOfResponse,
           dbId: targetDbId,
-          dbName: database.database_name
+          dbName: database.database_name || "database"
         }
       });
     }

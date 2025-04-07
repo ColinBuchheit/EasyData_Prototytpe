@@ -12,6 +12,7 @@ import {
 import { QueryRequest, NaturalLanguageQueryRequest, QueryStatus } from '../types/query.types';
 import { addMessage } from '../store/slices/chatSlice';
 import { addToast } from '../store/slices/uiSlice';
+import { isQueryContext } from '../utils/type-guards';
 
 export const useQuery = () => {
   const dispatch = useAppDispatch();
@@ -23,6 +24,14 @@ export const useQuery = () => {
     lastError, 
     loading 
   } = useAppSelector(state => state.query);
+
+  // Safely get current database ID
+  const getCurrentDbId = useCallback(() => {
+    if (isQueryContext(currentContext) && currentContext.currentDbId !== null) {
+      return currentContext.currentDbId;
+    }
+    return undefined;
+  }, [currentContext]);
 
   const runQuery = useCallback(async (query: QueryRequest) => {
     try {
@@ -124,6 +133,10 @@ export const useQuery = () => {
 
   const setDbContext = useCallback(async (dbId: number) => {
     try {
+      if (typeof dbId !== 'number' || isNaN(dbId)) {
+        throw new Error('Invalid database ID provided');
+      }
+      
       await dispatch(setCurrentContext(dbId)).unwrap();
       return true;
     } catch (error) {
@@ -138,6 +151,7 @@ export const useQuery = () => {
   return {
     history,
     currentContext,
+    currentDbId: getCurrentDbId(),
     status,
     statusMessage,
     lastError,
@@ -146,7 +160,8 @@ export const useQuery = () => {
     runNaturalLanguageQuery,
     loadQueryHistory,
     loadCurrentContext,
-    setDbContext
+    setDbContext,
+    getCurrentDbId
   };
 };
 

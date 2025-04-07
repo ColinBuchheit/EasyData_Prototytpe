@@ -81,7 +81,7 @@ const QueryHistoryViewer: React.FC<QueryHistoryViewerProps> = ({ history, onSele
         <h3 className="text-lg font-medium text-zinc-100">Query History</h3>
         <p className="text-sm text-zinc-400 mt-1">Your recent database queries</p>
       </div>
-
+  
       <div className="divide-y divide-zinc-800">
         {history.map((item) => (
           <div key={item.id || item.timestamp} className="bg-zinc-900">
@@ -93,16 +93,16 @@ const QueryHistoryViewer: React.FC<QueryHistoryViewerProps> = ({ history, onSele
                 <Database className="w-4 h-4 text-zinc-400" />
                 <div>
                   <div className="text-zinc-300 font-medium">
-                    {item.queryText.length > 40
+                    {item.queryText && item.queryText.length > 40
                       ? `${item.queryText.substring(0, 40)}...`
-                      : item.queryText}
+                      : item.queryText || 'Unknown query'}
                   </div>
                   <div className="text-xs text-zinc-500 flex items-center gap-2">
                     <span>{formatDate(item.timestamp)}</span>
                     <span>•</span>
-                    <span>{formatExecutionTime(item.executionTimeMs)}</span>
+                    <span>{formatExecutionTime(item.executionTimeMs || 0)}</span>
                     <span>•</span>
-                    <span>{item.rowCount} rows</span>
+                    <span>{(item.rowCount || 0).toLocaleString()} rows</span>
                   </div>
                 </div>
               </div>
@@ -114,11 +114,11 @@ const QueryHistoryViewer: React.FC<QueryHistoryViewerProps> = ({ history, onSele
                 )}
               </div>
             </div>
-
+  
             {expandedItems[item.id || item.timestamp] && (
               <div className="px-4 py-3 bg-zinc-950 border-t border-zinc-800">
                 <pre className="bg-zinc-900 p-3 rounded-md text-zinc-300 text-sm overflow-x-auto">
-                  {item.queryText}
+                  {item.queryText || 'No query text available'}
                 </pre>
                 <div className="mt-3 flex gap-2">
                   <button

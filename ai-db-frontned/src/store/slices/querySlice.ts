@@ -16,7 +16,7 @@ const initialState: QueryState = {
   history: [],
   currentContext: null,
   status: QueryStatus.IDLE,
-  progressUpdates: [], // Add to store streaming updates
+  progressUpdates: [], 
   lastError: null,
   loading: false,
 };
@@ -67,7 +67,7 @@ export const fetchQueryHistory = createAsyncThunk(
       if (!response.success) {
         return rejectWithValue(response.message || 'Failed to fetch query history');
       }
-      return response.history;
+      return response.history || []; // Add fallback empty array
     } catch (error: any) {
       return rejectWithValue(error.response?.data?.message || error.message || 'Failed to fetch query history');
     }
@@ -93,6 +93,10 @@ export const setCurrentContext = createAsyncThunk(
   'query/setCurrentContext',
   async (dbId: number, { rejectWithValue }) => {
     try {
+      if (typeof dbId !== 'number' || isNaN(dbId)) {
+        return rejectWithValue('Invalid database ID');
+      }
+      
       const response = await queryApi.setCurrentContext(dbId);
       if (!response.success) {
         return rejectWithValue(response.message || 'Failed to set current context');
@@ -185,7 +189,7 @@ const querySlice = createSlice({
     });
     builder.addCase(fetchQueryHistory.fulfilled, (state, action) => {
       state.loading = false;
-      state.history = action.payload;
+      state.history = action.payload || []; // Handle potentially undefined payload
     });
     builder.addCase(fetchQueryHistory.rejected, (state, action) => {
       state.loading = false;
@@ -194,14 +198,30 @@ const querySlice = createSlice({
 
     // Get current context
     builder.addCase(getCurrentContext.fulfilled, (state, action) => {
-      state.currentContext = action.payload;
+      // Check if action.payload exists before setting state
+      if (action.payload) {
+        state.currentContext = action.payload;
+      }
     });
 
-    // Set current context
+    // Set current context with proper initialization
     builder.addCase(setCurrentContext.fulfilled, (state, action) => {
-      if (state.currentContext) {
-        state.currentContext.currentDbId = action.payload.dbId;
-        state.currentContext.lastSwitchTime = new Date().toISOString();
+      const dbId = action.payload?.dbId;
+      
+      // Only proceed if we have a valid dbId
+      if (typeof dbId === 'number') {
+        if (state.currentContext) {
+          state.currentContext.currentDbId = dbId;
+          state.currentContext.lastSwitchTime = new Date().toISOString();
+        } else {
+          // Initialize the context if it doesn't exist
+          state.currentContext = {
+            userId: 0, // This is a placeholder - would need to be passed in the payload
+            currentDbId: dbId,
+            lastSwitchTime: new Date().toISOString(),
+            recentQueries: []
+          };
+        }
       }
     });
   },

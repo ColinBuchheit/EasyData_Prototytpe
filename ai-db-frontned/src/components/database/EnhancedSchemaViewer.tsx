@@ -1,4 +1,5 @@
-// src/components/database/EnhancedSchemaViewer.tsx
+// src/components/database/EnhancedSchemaViewer.tsx (with fixes)
+
 import React, { useState } from 'react';
 import { ChevronDown, ChevronRight, Table, Key, Link, Info, List, Calendar } from 'lucide-react';
 import { DbSchema, DatabaseTable, DbRelationship } from '../../types/database.types';
@@ -16,6 +17,7 @@ const EnhancedSchemaViewer: React.FC<EnhancedSchemaViewerProps> = ({ schema }) =
     setOpenTables((prev) => ({ ...prev, [table]: !prev[table] }));
   };
 
+  // Early return with fallback UI for null schema
   if (!schema) {
     return (
       <div className="p-4 text-zinc-400 bg-zinc-900 rounded-md text-center">
@@ -43,22 +45,28 @@ const EnhancedSchemaViewer: React.FC<EnhancedSchemaViewerProps> = ({ schema }) =
     }
   };
 
+  // Ensure tables exists and is an array
+  const tables = Array.isArray(schema.tables) ? schema.tables : [];
+  
+  // Ensure relationships exists and is an array
+  const relationships = Array.isArray(schema.relationships) ? schema.relationships : [];
+
   return (
     <div className="space-y-4 text-sm bg-zinc-950 rounded-lg border border-zinc-800 overflow-hidden">
       {/* Schema Header */}
       <div className="bg-zinc-900 p-4 border-b border-zinc-800">
-        <h3 className="text-lg font-medium text-zinc-100">{schema.name}</h3>
-        <div className="text-zinc-400 text-xs mt-1">Type: {schema.type}</div>
+        <h3 className="text-lg font-medium text-zinc-100">{schema.name || 'Unnamed Schema'}</h3>
+        <div className="text-zinc-400 text-xs mt-1">Type: {schema.type || 'Unknown'}</div>
       </div>
 
       {/* Tables Section */}
       <div className="p-4 space-y-2">
         <h4 className="text-zinc-300 font-medium mb-3 flex items-center gap-2">
           <List className="w-4 h-4" />
-          Tables ({schema.tables.length})
+          Tables ({tables.length})
         </h4>
 
-        {schema.tables.map((table: DatabaseTable) => (
+        {tables.map((table: DatabaseTable) => (
           <div key={table.name} className="border border-zinc-800 rounded-md mb-2">
             <button
               onClick={() => toggleTable(table.name)}
@@ -67,7 +75,7 @@ const EnhancedSchemaViewer: React.FC<EnhancedSchemaViewerProps> = ({ schema }) =
               <span className="flex items-center gap-2">
                 <Table className="w-4 h-4 text-zinc-400" />
                 <span className="text-zinc-200">{table.name}</span>
-                {table.estimatedRows && (
+                {typeof table.estimatedRows === 'number' && (
                   <span className="text-xs text-zinc-500">
                     ~{table.estimatedRows.toLocaleString()} rows
                   </span>
@@ -88,7 +96,7 @@ const EnhancedSchemaViewer: React.FC<EnhancedSchemaViewerProps> = ({ schema }) =
                   </div>
                 )}
                 <ul className="bg-zinc-950 divide-y divide-zinc-900">
-                  {table.columns.map((column) => (
+                  {Array.isArray(table.columns) && table.columns.map((column) => (
                     <li
                       key={column.name}
                       className="px-4 py-2 flex items-center justify-between hover:bg-zinc-900"
@@ -100,7 +108,7 @@ const EnhancedSchemaViewer: React.FC<EnhancedSchemaViewerProps> = ({ schema }) =
                         </span>
                         <span className="text-xs text-zinc-500">
                           {column.type}
-                          {column.nullable ? '' : ' NOT NULL'}
+                          {column.nullable === false ? ' NOT NULL' : ''}
                         </span>
                       </div>
                       {column.description && (
@@ -118,7 +126,7 @@ const EnhancedSchemaViewer: React.FC<EnhancedSchemaViewerProps> = ({ schema }) =
       </div>
 
       {/* Relationships Section */}
-      {schema.relationships && schema.relationships.length > 0 && (
+      {relationships.length > 0 && (
         <div className="px-4 pb-4">
           <button
             onClick={() => setOpenRelationships(!openRelationships)}
@@ -126,7 +134,7 @@ const EnhancedSchemaViewer: React.FC<EnhancedSchemaViewerProps> = ({ schema }) =
           >
             <span className="flex items-center gap-2">
               <Link className="w-4 h-4 text-zinc-400" />
-              <span className="text-zinc-200">Relationships ({schema.relationships.length})</span>
+              <span className="text-zinc-200">Relationships ({relationships.length})</span>
             </span>
             {openRelationships ? (
               <ChevronDown className="w-4 h-4" />
@@ -137,7 +145,7 @@ const EnhancedSchemaViewer: React.FC<EnhancedSchemaViewerProps> = ({ schema }) =
 
           {openRelationships && (
             <div className="space-y-2 mt-2">
-              {schema.relationships.map((rel: DbRelationship, index) => (
+              {relationships.map((rel: DbRelationship, index) => (
                 <div key={index} className="border border-zinc-800 rounded-md p-3 bg-zinc-900">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -151,11 +159,11 @@ const EnhancedSchemaViewer: React.FC<EnhancedSchemaViewerProps> = ({ schema }) =
                   <div className="mt-2 text-xs grid grid-cols-2 gap-2">
                     <div className="bg-zinc-800 p-2 rounded">
                       <div className="text-zinc-500">Source</div>
-                      <div className="text-zinc-300">{rel.source.table}.{rel.source.column}</div>
+                      <div className="text-zinc-300">{rel.source?.table || ''}.{rel.source?.column || ''}</div>
                     </div>
                     <div className="bg-zinc-800 p-2 rounded">
                       <div className="text-zinc-500">Target</div>
-                      <div className="text-zinc-300">{rel.target.table}.{rel.target.column}</div>
+                      <div className="text-zinc-300">{rel.target?.table || ''}.{rel.target?.column || ''}</div>
                     </div>
                   </div>
                 </div>
