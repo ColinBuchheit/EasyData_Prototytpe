@@ -39,17 +39,6 @@ app.use("/api/query", queryRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/users", userRoutes);
 
-// Root API Route
-app.get("/", (req, res) => {
-  logger.info("✅ API is running");
-  res.json({ 
-    success: true,
-    message: "🚀 EasyData API is running successfully!",
-    version: process.env.npm_package_version || "1.0.0",
-    environment: process.env.NODE_ENV || "development"
-  });
-});
-
 app.get("/health", (req, res) => {
   res.json({ 
     success: true,

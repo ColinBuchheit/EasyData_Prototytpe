@@ -5,8 +5,7 @@ import {
   LoginResponse, 
   RegisterRequest, 
   RegisterResponse,
-  PasswordResetRequest,
-  TokenValidationRequest 
+  PasswordResetRequest 
 } from '../types/auth.types';
 
 export const authApi = {

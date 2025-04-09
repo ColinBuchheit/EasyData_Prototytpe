@@ -118,7 +118,7 @@ process.on("unhandledRejection", (reason, promise) => {
 });
 
 // Start Server & Database Connection
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 server.listen(PORT, async () => {
   try {
     console.log(`[Server] Server listening on port ${PORT}`);

@@ -256,7 +256,7 @@ export class ProfileService {
       );
       
       profileLogger.info(`Deleted profile for user ${userId}`);
-      return result.rowCount > 0;
+      return result.rowCount !== null && result.rowCount > 0;
     } catch (error) {
       profileLogger.error(`Error deleting profile for user ${userId}: ${(error as Error).message}`);
       throw error;

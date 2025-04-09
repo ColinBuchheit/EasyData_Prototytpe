@@ -4,8 +4,10 @@ import { createContextLogger } from "../../../config/logger";
 import { getMongoClient } from "../../../config/db";
 import { ConnectionsService } from "../../database/services/connections.service";
 import { SchemaService } from "../../database/services/schema.service";
-import { Query, QueryRequest, QueryResult, QueryStatus } from "../models/query.model";
+import { Query, QueryRequest, QueryStatus } from "../models/query.model";
 import { QueryHistoryRecord } from "../models/result.model";
+import { QueryResult, } from "../models/result.model";
+
 
 const queryLogger = createContextLogger("QueryService");
 
@@ -72,14 +74,16 @@ export class QueryService {
     } catch (error) {
       const executionTimeMs = Date.now() - startTime;
       queryLogger.error(`Error executing query: ${(error as Error).message}`);
-      
+    
       return {
         success: false,
         executionTimeMs,
+        rowCount: undefined, // ✅ Fix added here
         error: (error as Error).message,
         message: "Failed to execute query."
       };
     }
+  
   }
   
   /**
@@ -121,18 +125,33 @@ export class QueryService {
   static async getQueryHistory(userId: number, limit = 10): Promise<QueryHistoryRecord[]> {
     try {
       const client = await getMongoClient();
-      const history = await client.db().collection('query_history')
+      const rawHistory = await client.db().collection('query_history')
         .find({ userId })
         .sort({ timestamp: -1 })
         .limit(limit)
         .toArray();
-      
-      return history as QueryHistoryRecord[];
+  
+      const history: QueryHistoryRecord[] = rawHistory.map((doc: any) => ({
+        userId: doc.userId,
+        dbId: doc.dbId,
+        queryText: doc.queryText,
+        executionTimeMs: doc.executionTimeMs,
+        rowCount: doc.rowCount,
+        timestamp: new Date(doc.timestamp),
+        explanation: doc.explanation,
+        aiProcessingTimeMs: doc.aiProcessingTimeMs,
+        visualizationGenerated: doc.visualizationGenerated
+      }));
+  
+      return history;
     } catch (error) {
       queryLogger.error(`Error fetching query history: ${(error as Error).message}`);
       return [];
     }
   }
+  
+  
+  
   
   /**
    * Get query history for a specific database
@@ -140,18 +159,30 @@ export class QueryService {
   static async getQueryHistoryForDatabase(userId: number, dbId: number, limit = 10): Promise<QueryHistoryRecord[]> {
     try {
       const client = await getMongoClient();
-      const history = await client.db().collection('query_history')
+      const rawHistory = await client.db().collection('query_history')
         .find({ userId, dbId })
         .sort({ timestamp: -1 })
         .limit(limit)
         .toArray();
-      
-      return history as QueryHistoryRecord[];
+  
+      const history: QueryHistoryRecord[] = rawHistory.map((doc: any) => ({
+        userId: doc.userId,
+        dbId: doc.dbId,
+        queryText: doc.queryText,
+        executionTimeMs: doc.executionTimeMs,
+        rowCount: doc.rowCount,
+        timestamp: new Date(doc.timestamp),
+        explanation: doc.explanation,
+        aiProcessingTimeMs: doc.aiProcessingTimeMs,
+        visualizationGenerated: doc.visualizationGenerated
+      }));
+  
+      return history;
     } catch (error) {
       queryLogger.error(`Error fetching database query history: ${(error as Error).message}`);
       return [];
     }
   }
-}
+}   
 
 export default QueryService;

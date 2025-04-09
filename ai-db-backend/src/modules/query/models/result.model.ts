@@ -1,14 +1,15 @@
 // src/modules/query/models/result.model.ts
 
 export interface QueryResult {
-    success: boolean;
-    rows?: any[];
-    rowCount?: number;
-    executionTimeMs?: number;
-    message?: string;
-    error?: string;
-    visualizationCode?: string;
-  }
+  success: boolean;
+  rows?: any[];
+  rowCount?: number | null;
+  executionTimeMs?: number | null;
+  message?: string;
+  error?: string;
+  visualizationCode?: string;
+}
+
   
   export interface MultiDbQueryResult {
     success: boolean;
