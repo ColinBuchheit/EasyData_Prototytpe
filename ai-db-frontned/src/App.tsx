@@ -1,16 +1,14 @@
-// src/App.tsx (updated)
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter } from 'react-router-dom';
 import { useAppDispatch } from './hooks/useRedux';
 import { wsConnect } from './store/middleware/websocketMiddleware';
 import AppRoutes from './routes/index';
 import { useTheme } from './hooks/useTheme';
 import ToastContainer from './components/common/Toast';
-import { checkApiHealth, HealthCheckResult } from './utils/api-health';
+import { checkApiHealth } from './utils/api-health';
 
 const App: React.FC = () => {
   const dispatch = useAppDispatch();
-  const [healthResults, setHealthResults] = useState<HealthCheckResult[]>([]);
   
   // Initialize theme
   useTheme();
@@ -18,8 +16,7 @@ const App: React.FC = () => {
   // Check API health on startup
   useEffect(() => {
     const runHealthCheck = async () => {
-      const results = await checkApiHealth();
-      setHealthResults(results);
+      await checkApiHealth();
     };
     
     runHealthCheck();
@@ -35,8 +32,10 @@ const App: React.FC = () => {
 
   return (
     <BrowserRouter>
-      <AppRoutes />
-      <ToastContainer />
+      <div className="min-h-screen bg-background text-text-primary">
+        <AppRoutes />
+        <ToastContainer />
+      </div>
     </BrowserRouter>
   );
 };
