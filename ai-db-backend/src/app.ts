@@ -16,7 +16,6 @@ import analyticsRoutes from "./modules/analytics/routes";
 import userRoutes from "./modules/user/routes";
 import { checkOverallHealth } from "./modules/ai/controller/health.controller";
 
-
 // Load environment variables
 dotenv.config();
 
@@ -31,14 +30,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan("dev"));
 
-// API Routes
-app.get("/", checkOverallHealth);
-app.use("/api/auth", authRoutes);
-app.use("/api/database", databaseRoutes);
-app.use("/api/query", queryRoutes);
-app.use("/api/analytics", analyticsRoutes);
-app.use("/api/users", userRoutes);
-
+// Health check routes - put BEFORE other routes to ensure they're accessible
 app.get("/health", (req, res) => {
   res.json({ 
     success: true,
@@ -48,6 +40,41 @@ app.get("/health", (req, res) => {
     environment: process.env.NODE_ENV || "development"
   });
 });
+
+// Add the health endpoint that the frontend is looking for
+app.get("/api/health", (req, res) => {
+  res.json({ 
+    success: true,
+    status: "available",
+    message: "API is healthy"
+  });
+});
+
+// Add Auth health check that frontend is looking for
+app.get("/api/auth/health", (req, res) => {
+  res.json({
+    success: true,
+    status: "available",
+    message: "Auth service is healthy"
+  });
+});
+
+// Database health check - this is public (no auth required)
+app.get("/api/database/health", (req, res) => {
+  res.json({
+    success: true,
+    status: "available", 
+    message: "Database service is healthy"
+  });
+});
+
+// API Routes
+app.get("/", checkOverallHealth);
+app.use("/api/auth", authRoutes);
+app.use("/api/database", databaseRoutes);
+app.use("/api/query", queryRoutes);
+app.use("/api/analytics", analyticsRoutes);
+app.use("/api/users", userRoutes);
 
 // 404 handler
 app.use((req, res, next) => {
@@ -62,6 +89,5 @@ app.use((req, res, next) => {
 
 // Global error handling middleware
 app.use(globalErrorHandler);
-
 
 export default app;

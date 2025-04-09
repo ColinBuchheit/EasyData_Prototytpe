@@ -1,7 +1,8 @@
-// src/utils/api-health.ts
+// src/utils/api-health.ts - Revised version
 import apiClient from '../api/index';
 import { addToast } from '../store/slices/uiSlice';
 import { store } from '../store';
+import { getToken } from '../utils/auth.utils';
 
 export interface HealthCheckResult {
   service: string;
@@ -16,19 +17,28 @@ export interface HealthCheckResult {
 export const checkApiHealth = async (): Promise<HealthCheckResult[]> => {
   const results: HealthCheckResult[] = [];
   const startTime = Date.now();
+  const token = getToken(); // Check for auth token
   
   try {
-    // 1. Check main API health
+    // 1. Always check main API health (public endpoint)
     const mainApiResult = await checkMainApiHealth();
     results.push(mainApiResult);
     
-    // 2. Check authentication service
-    const authResult = await checkAuthService();
-    results.push(authResult);
-    
-    // 3. Check database service
-    const dbResult = await checkDatabaseService();
-    results.push(dbResult);
+    // Only perform authenticated checks if a token exists
+    if (token) {
+      try {
+        // 2. Check authentication service
+        const authResult = await checkAuthService();
+        results.push(authResult);
+        
+        // 3. Check database service (authenticated)
+        const dbResult = await checkDatabaseService();
+        results.push(dbResult);
+      } catch (authError) {
+        console.error('Authentication-related health checks failed:', authError);
+        // Non-critical, continue without failing
+      }
+    }
     
     // Notify user about any issues
     const unhealthy = results.filter(r => r.status === 'unhealthy');
@@ -61,18 +71,19 @@ export const checkApiHealth = async (): Promise<HealthCheckResult[]> => {
 };
 
 /**
- * Check the main API health
+ * Check the main API health (public endpoint)
  */
 const checkMainApiHealth = async (): Promise<HealthCheckResult> => {
   const startTime = Date.now();
   try {
-    const response = await apiClient.get('/health', { timeout: 5000 });
+    // Use a simple public endpoint that doesn't require auth
+    const response = await apiClient.get('/status', { timeout: 5000 });
     const latency = Date.now() - startTime;
     
     return {
       service: 'API',
-      status: response.data.status === 'available' ? 'healthy' : 'unhealthy',
-      message: response.data.message,
+      status: response.data.success ? 'healthy' : 'unhealthy',
+      message: response.data.message || 'API service checked',
       latency
     };
   } catch (error) {
@@ -91,13 +102,14 @@ const checkMainApiHealth = async (): Promise<HealthCheckResult> => {
 const checkAuthService = async (): Promise<HealthCheckResult> => {
   const startTime = Date.now();
   try {
-    const response = await apiClient.get('/auth/health', { timeout: 5000 });
+    // Use a proper authenticated endpoint
+    const response = await apiClient.get('/users/profile', { timeout: 5000 });
     const latency = Date.now() - startTime;
     
     return {
       service: 'Authentication',
-      status: response.data.status === 'available' ? 'healthy' : 'unhealthy',
-      message: response.data.message,
+      status: response.data.success ? 'healthy' : 'unhealthy',
+      message: 'Authentication service checked',
       latency
     };
   } catch (error) {
@@ -111,12 +123,13 @@ const checkAuthService = async (): Promise<HealthCheckResult> => {
 };
 
 /**
- * Check the database service
+ * Check the database service (requires authentication)
  */
 const checkDatabaseService = async (): Promise<HealthCheckResult> => {
   const startTime = Date.now();
   try {
-    const response = await apiClient.get('/database/health/connections', { timeout: 5000 });
+    // This endpoint requires authentication
+    const response = await apiClient.get('/database/connections', { timeout: 5000 });
     const latency = Date.now() - startTime;
     
     return {

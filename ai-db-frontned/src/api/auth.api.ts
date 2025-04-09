@@ -46,10 +46,23 @@ export const authApi = {
     const response = await apiClient.post('/auth/reset-password', data);
     return response.data;
   },
+
+  getCurrentUser: async (): Promise<{ success: boolean; user?: any }> => {
+    try {
+      const response = await apiClient.get('/api/auth/verify');
+      return response.data;
+    } catch (error) {
+      console.error("[AUTH API] Error fetching current user:", error);
+      return { success: false };
+    }
+  },
   
   // Change password (when already logged in)
   changePassword: async (currentPassword: string, newPassword: string): Promise<{ success: boolean }> => {
     const response = await apiClient.post('/auth/change-password', { currentPassword, newPassword });
     return response.data;
   }
+  
 };
+
+

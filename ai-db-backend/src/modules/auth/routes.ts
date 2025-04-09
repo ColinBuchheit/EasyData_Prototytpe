@@ -10,7 +10,8 @@ import {
   requestPasswordReset,
   validateResetTokenHandler,
   resetPassword,
-  changePassword
+  changePassword,
+  verifyToken
 } from "./controllers/auth.controller";
 
 import {
@@ -47,7 +48,7 @@ const loginLimiter = rateLimit({
  */
 const registerLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, 
-  max: 3,
+  max: 10,
   handler: (req, res) => res.status(429).json({ 
     success: false, 
     message: "Too many registration attempts. Try again later." 
@@ -97,5 +98,7 @@ router.post("/agent/register", registerAgent);
 router.get("/agent/:agentId", verifyTokenMiddleware, requireRole(["admin"]), getAgentDetails);
 router.get("/agents", verifyTokenMiddleware, requireRole(["admin"]), listAgents);
 router.put("/agent/:agentId/status", verifyTokenMiddleware, requireRole(["admin"]), updateAgentStatus);
+router.get("/verify", verifyTokenMiddleware, verifyToken);
+
 
 export default router;

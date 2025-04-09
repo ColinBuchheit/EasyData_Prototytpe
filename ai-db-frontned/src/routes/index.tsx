@@ -1,6 +1,6 @@
 // src/routes/index.tsx
 import React from 'react';
-import { Navigate, RouteObject, useRoutes } from 'react-router-dom';
+import { Navigate, RouteObject, useLocation, useRoutes } from 'react-router-dom';
 import { useAppSelector } from '../hooks/useRedux';
 
 // Layout Components
@@ -17,11 +17,19 @@ import ProfilePage from '../pages/ProfilePage';
 
 // Auth Guard Component
 const AuthGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { isAuthenticated } = useAppSelector(state => state.auth);
+  const { isAuthenticated, loading } = useAppSelector(state => state.auth);
+  const location = useLocation();
+  
+  // Show loading indicator while checking auth status
+  if (loading) {
+    return <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+    </div>;
+  }
   
   if (!isAuthenticated) {
-    // Redirect to login if not authenticated
-    return <Navigate to="/login" replace />;
+    // Redirect to login if not authenticated, preserving the intended destination
+    return <Navigate to="/login" replace state={{ from: location }} />;
   }
   
   return <>{children}</>;

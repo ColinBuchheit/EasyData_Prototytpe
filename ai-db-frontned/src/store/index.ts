@@ -6,12 +6,15 @@ import queryReducer from './slices/querySlice';
 import chatReducer from './slices/chatSlice';
 import uiReducer from './slices/uiSlice';
 import websocketMiddleware from './middleware/websocketMiddleware';
+import userReducer from './slices/userSlice';
+
 
 export const store = configureStore({
   reducer: {
     auth: authReducer,
-    database: databaseReducer,
+    user: userReducer,
     query: queryReducer,
+    database: databaseReducer,
     chat: chatReducer,
     ui: uiReducer,
   },

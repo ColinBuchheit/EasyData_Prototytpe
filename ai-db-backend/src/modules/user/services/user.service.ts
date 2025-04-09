@@ -34,16 +34,24 @@ export class UserService {
    */
   static async getUserByUsername(username: string): Promise<UserWithAuth | null> {
     try {
+      console.log(`[USER DEBUG] Looking up user with username: ${username}`);
       const result = await pool.query(
         `SELECT id, username, email, password_hash, role, status, created_at as "createdAt", 
          updated_at as "updatedAt", last_login_at as "lastLoginAt"
-         FROM users WHERE username = $1`,
+         FROM users WHERE LOWER(username) = LOWER($1)`,
         [username]
       );
+      
+      console.log(`[USER DEBUG] User lookup result: ${result.rows.length > 0 ? 'Found' : 'Not found'}`);
+      if (result.rows.length > 0) {
+        console.log(`[USER DEBUG] User status: ${result.rows[0].status}`);
+        console.log(`[USER DEBUG] Password hash exists: ${!!result.rows[0].password_hash}`);
+      }
       
       return result.rows.length > 0 ? result.rows[0] : null;
     } catch (error) {
       userLogger.error(`Error fetching user by username: ${(error as Error).message}`);
+      console.log(`[USER DEBUG] Error in getUserByUsername: ${(error as Error).message}`);
       throw new Error(`Failed to fetch user: ${(error as Error).message}`);
     }
   }
@@ -169,8 +177,8 @@ export class UserService {
         throw new Error('Username or email already exists');
       }
       
-      // Hash password
-      const hashedPassword = await hashPassword(userData.password);
+      // Hash password - this should already be hashed from the auth controller
+      console.log(`[USER DEBUG] Creating user, password hash length: ${userData.password.length}`);
       
       // Set default role if not provided
       const role = userData.role || 'user';
@@ -180,7 +188,7 @@ export class UserService {
         `INSERT INTO users (username, email, password_hash, role, status, created_at, updated_at)
          VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
          RETURNING id, username, email, role, status, created_at as "createdAt", updated_at as "updatedAt"`,
-        [userData.username, userData.email, hashedPassword, role, 'active']
+        [userData.username, userData.email, userData.password, role, 'active']
       );
       
       userLogger.info(`Created new user: ${userData.username} (${userData.email})`);
@@ -437,13 +445,15 @@ export class UserService {
       const user = await this.getUserByUsername(username);
       
       if (!user || user.status !== 'active') {
+        console.log(`[USER DEBUG] ValidateCredentials failed: ${!user ? 'User not found' : `User not active (${user.status})`}`);
         return null;
       }
       
       // Verify password
+      console.log(`[USER DEBUG] Comparing password, hash length: ${user.password_hash ? user.password_hash.length : 'hash missing'}`);
       const isValid = await comparePassword(password, user.password_hash);
-
-      
+      console.log(`[USER DEBUG] Password comparison result: ${isValid}`);
+  
       if (!isValid) {
         return null;
       }
@@ -456,6 +466,7 @@ export class UserService {
       return userWithoutPassword;
     } catch (error) {
       userLogger.error(`Error validating credentials: ${(error as Error).message}`);
+      console.log(`[USER DEBUG] Error in validateCredentials: ${(error as Error).message}`);
       return null;
     }
   }

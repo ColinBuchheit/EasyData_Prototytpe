@@ -7,7 +7,8 @@ import {
   RegisterRequest,
   PasswordResetRequest
 } from '../../types/auth.types';
-import { setToken, clearTokens, getToken, getRefreshToken } from '../../utils/auth.utils';
+import { setToken, clearTokens, getToken, getRefreshToken, setRefreshToken } from '../../utils/auth.utils';
+import { fetchUserProfile } from './userSlice';
 
 const initialState: AuthState = {
   user: null,
@@ -21,25 +22,21 @@ const initialState: AuthState = {
 // Async thunks
 export const login = createAsyncThunk(
   'auth/login',
-  async (credentials: LoginRequest, { rejectWithValue }) => {
-    try {
-      const response = await authApi.login(credentials);
-      if (!response.success) {
-        return rejectWithValue(response.message || 'Login failed');
+  async (credentials: LoginRequest, { dispatch }) => {
+    const response = await authApi.login(credentials);
+    if (response.success) {
+      // Set tokens
+      setToken(response.token!);
+      if (response.refreshToken) {
+        setRefreshToken(response.refreshToken);
       }
       
-      // Store tokens in localStorage
-      if (response.token) {
-        setToken(response.token);
-      }
-      if (response.refreshToken) {
-        localStorage.setItem('refreshToken', response.refreshToken);
-      }
+      // Fetch user profile after successful login
+      dispatch(fetchUserProfile());
       
       return response;
-    } catch (error: any) {
-      return rejectWithValue(error.response?.data?.message || error.message || 'Login failed');
     }
+    throw new Error(response.message || 'Login failed');
   }
 );
 
@@ -85,6 +82,14 @@ export const resetPassword = createAsyncThunk(
     } catch (error: any) {
       return rejectWithValue(error.response?.data?.message || error.message || 'Password reset failed');
     }
+  }
+);
+
+export const getUserProfile = createAsyncThunk(
+  'auth/getUserProfile',
+  async (_, { dispatch }) => {
+    // Reuse the fetchUserProfile action from userSlice
+    dispatch(fetchUserProfile());
   }
 );
 
