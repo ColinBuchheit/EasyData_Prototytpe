@@ -1,5 +1,5 @@
 // src/components/chat/ChatMessage.tsx
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Message } from '../../types/chat.types';
 import { formatDistanceToNow } from 'date-fns';
 import ReactMarkdown from 'react-markdown';
@@ -12,16 +12,17 @@ import { addToast } from '../../store/slices/uiSlice';
 import { useAppDispatch } from '../../hooks/useRedux';
 import { motion } from 'framer-motion';
 
-interface ModernChatMessageProps {
+interface ChatMessageProps {
   message: Message;
   isFirst: boolean;
   isLast: boolean;
 }
 
-const ChatMessage: React.FC<ModernChatMessageProps> = ({ message, isFirst, isLast }) => {
+const ChatMessage: React.FC<ChatMessageProps> = ({ message, isFirst, isLast }) => {
   const dispatch = useAppDispatch();
   const [copied, setCopied] = useState(false);
   const [expanded, setExpanded] = useState(true);
+  const contentRef = useRef<HTMLDivElement>(null);
   
   // Format timestamp
   const formatTime = (timestamp: string) => {
@@ -56,10 +57,18 @@ const ChatMessage: React.FC<ModernChatMessageProps> = ({ message, isFirst, isLas
     );
   };
   
+  // Set up streaming animation for assistant messages
+  useEffect(() => {
+    if (message.role === 'assistant' && message.isStreaming && contentRef.current) {
+      contentRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+  }, [message.content, message.isStreaming, message.role]);
+  
   // Determine message type for styling
   const isUser = message.role === 'user';
   const isAssistant = message.role === 'assistant';
   const isSystem = message.role === 'system';
+  const isStreaming = message.isStreaming;
   
   // If message is collapsed, don't render
   if (!expanded) {
@@ -114,6 +123,11 @@ const ChatMessage: React.FC<ModernChatMessageProps> = ({ message, isFirst, isLas
           <span className="ml-2 text-xs text-zinc-500">
             {formatTime(message.timestamp)}
           </span>
+          {isStreaming && (
+            <span className="ml-2 px-1.5 py-0.5 bg-blue-900/30 text-blue-400 text-xs rounded-full">
+              Typing...
+            </span>
+          )}
         </div>
         
         {/* Action buttons - only show on hover */}
@@ -141,11 +155,15 @@ const ChatMessage: React.FC<ModernChatMessageProps> = ({ message, isFirst, isLas
       </div>
       
       {/* Message content */}
-      <div className={cn(
-        "px-14 prose prose-invert prose-zinc max-w-none",
-        "prose-pre:bg-zinc-900 prose-pre:border prose-pre:border-zinc-800 prose-pre:rounded-lg",
-        "prose-code:bg-zinc-800 prose-code:rounded prose-code:px-1 prose-code:py-0.5 prose-code:before:content-none prose-code:after:content-none"
-      )}>
+      <div 
+        ref={contentRef}
+        className={cn(
+          "px-14 prose prose-invert prose-zinc max-w-none",
+          "prose-pre:bg-zinc-900 prose-pre:border prose-pre:border-zinc-800 prose-pre:rounded-lg",
+          "prose-code:bg-zinc-800 prose-code:rounded prose-code:px-1 prose-code:py-0.5 prose-code:before:content-none prose-code:after:content-none",
+          isStreaming && "animate-pulse"
+        )}
+      >
         <ReactMarkdown
           components={{
             // Custom rendering for code blocks
@@ -190,6 +208,15 @@ const ChatMessage: React.FC<ModernChatMessageProps> = ({ message, isFirst, isLas
         {message.error && (
           <div className="mt-4 p-4 bg-red-900/20 border border-red-800/50 rounded-lg text-red-300 text-sm">
             {message.error}
+          </div>
+        )}
+        
+        {/* Streaming indicator at the end of message */}
+        {isStreaming && (
+          <div className="mt-2 flex gap-1">
+            <div className="w-2 h-2 rounded-full bg-blue-500 animate-ping"></div>
+            <div className="w-2 h-2 rounded-full bg-blue-500 animate-ping" style={{ animationDelay: '0.2s' }}></div>
+            <div className="w-2 h-2 rounded-full bg-blue-500 animate-ping" style={{ animationDelay: '0.4s' }}></div>
           </div>
         )}
       </div>

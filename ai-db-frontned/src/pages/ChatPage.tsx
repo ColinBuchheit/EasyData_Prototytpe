@@ -15,12 +15,11 @@ import {
   deleteSession
 } from '../store/slices/chatSlice';
 import { fetchQueryHistory } from '../store/slices/querySlice';
-import MainLayout from '../components/layout/MainLayout';
 import ChatContainer from '../components/chat/ChatContainer';
 import ChatSidebar from '../components/chat/ChatSidebar';
-import { toggleSidebar, addToast } from '../store/slices/uiSlice';
+import ChatProgress from '../components/chat/ChatProgress';
+import { addToast } from '../store/slices/uiSlice';
 import useChat from '../hooks/useChat';
-import useWebSocket from '../hooks/useWebSocket';
 import { Database, Menu, Plus, Settings, X } from 'lucide-react';
 import { cn } from '../utils/format.utils';
 import Button from '../components/common/Button';
@@ -32,8 +31,7 @@ const ChatPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { connections, selectedConnection } = useAppSelector(state => state.database);
-  const { sessions, currentSessionId } = useAppSelector(state => state.chat);
-  const { sidebarOpen } = useAppSelector(state => state.ui);
+  const { sessions, currentSessionId, status } = useAppSelector(state => state.chat);
   const { initializeWebSocket, startNewSession, switchSession, sendMessage } = useChat();
   
   // Local state
@@ -59,7 +57,7 @@ const ChatPage: React.FC = () => {
     initializeWebSocket();
   }, [initializeWebSocket]);
   
-  // Fetch connections on mount
+  // Fetch connections and query history on mount
   useEffect(() => {
     dispatch(fetchUserConnections());
     dispatch(fetchQueryHistory({ limit: 10 }));
@@ -68,7 +66,7 @@ const ChatPage: React.FC = () => {
   // Create new chat session
   const handleNewChat = async () => {
     try {
-      const session = await startNewSession();
+      const session = await startNewSession("New Chat");
       if (session) {
         // Update URL to include session ID
         navigate(`/chat?session=${session.id}`);
@@ -99,6 +97,40 @@ const ChatPage: React.FC = () => {
   const toggleMobileSidebar = () => {
     setIsMobileSidebarOpen(!isMobileSidebarOpen);
   };
+  
+  // Handle session deletion
+  const handleDeleteSession = (id: string) => {
+    if (id === currentSessionId) {
+      // If deleting current session, find another session to switch to
+      const otherSession = sessions.find(s => s.id !== id);
+      if (otherSession) {
+        dispatch(setCurrentSession(otherSession.id));
+        navigate(`/chat?session=${otherSession.id}`);
+      } else {
+        // If no other sessions exist, create a new one
+        handleNewChat();
+      }
+    }
+    
+    // Delete the session
+    dispatch(deleteSession(id));
+    
+    // Show toast notification
+    dispatch(addToast({
+      type: 'success',
+      message: 'Chat session deleted'
+    }));
+  };
+  
+  // Clear current chat
+  const handleClearChat = () => {
+    dispatch(clearMessages());
+    
+    dispatch(addToast({
+      type: 'info',
+      message: 'Chat cleared'
+    }));
+  };
 
   return (
     <div className="flex h-screen overflow-hidden bg-zinc-950">
@@ -124,23 +156,15 @@ const ChatPage: React.FC = () => {
             navigate(`/chat?session=${id}`);
             setIsMobileSidebarOpen(false);
           }}
-          onDeleteSession={(id: string | null) => {
-            if (id) {
-              dispatch(deleteSession(id));
-              if (id === currentSessionId && sessions.length > 1) {
-                const nextSession = sessions.find(s => s.id !== id);
-                if (nextSession) {
-                  dispatch(setCurrentSession(nextSession.id));
-                  navigate(`/chat?session=${nextSession.id}`);
-                }
-              }
-            }
-          }}
+          onDeleteSession={handleDeleteSession}
+          onClearChat={handleClearChat}
+          sessions={sessions}
+          currentSessionId={currentSessionId}
         />
       </div>
 
       {/* Main chat area */}
-      <div className="flex-1 flex flex-col h-screen overflow-hidden">
+      <div className="flex-1 flex flex-col h-screen overflow-hidden relative">
         {/* Chat header */}
         <div className="h-14 border-b border-zinc-800 px-4 flex items-center justify-between bg-zinc-900/80 backdrop-blur-sm">
           <div className="flex items-center">
@@ -170,7 +194,10 @@ const ChatPage: React.FC = () => {
                 variant="ghost"
                 size="sm"
                 leftIcon={<Database className="w-4 h-4" />}
-                rightIcon={<span className="w-2 h-2 rounded-full bg-green-500"></span>}
+                rightIcon={<span className={cn(
+                  "w-2 h-2 rounded-full",
+                  selectedConnection?.is_connected ? "bg-green-500" : "bg-red-500"
+                )}></span>}
                 onClick={() => setDbSelectorOpen(!dbSelectorOpen)}
               >
                 {selectedConnection ? (
@@ -183,11 +210,26 @@ const ChatPage: React.FC = () => {
               {dbSelectorOpen && (
                 <div className="absolute right-0 mt-2 w-60 bg-zinc-900 border border-zinc-800 rounded-lg shadow-lg z-10">
                   <div className="p-2">
-                    <DatabaseSelector
-                      connections={connections}
-                      selectedId={selectedConnection?.id}
-                      onSelect={handleSelectConnection}
-                    />
+                    {connections.length === 0 ? (
+                      <div className="text-center py-3 text-zinc-400 text-sm">
+                        No databases connected.
+                        <div className="mt-2">
+                          <Button
+                            variant="default"
+                            size="sm"
+                            onClick={() => navigate('/databases')}
+                          >
+                            Add Database
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <DatabaseSelector
+                        connections={connections}
+                        selectedId={selectedConnection?.id}
+                        onSelect={handleSelectConnection}
+                      />
+                    )}
                   </div>
                 </div>
               )}
@@ -207,6 +249,13 @@ const ChatPage: React.FC = () => {
         
         {/* Chat container */}
         <ChatContainer />
+        
+        {/* Progress indicator (floating) */}
+        <AnimatePresence>
+          {(status === 'loading' || status === 'streaming') && (
+            <ChatProgress />
+          )}
+        </AnimatePresence>
       </div>
       
       {/* Mobile sidebar backdrop */}

@@ -1,5 +1,5 @@
 // src/hooks/useChat.ts
-import { useCallback } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { useAppDispatch, useAppSelector } from './useRedux';
 import { 
   createChatSession, 
@@ -8,9 +8,8 @@ import {
   clearMessages, 
   deleteSession 
 } from '../store/slices/chatSlice';
-import { wsConnect, wsSendQuery } from '../store/middleware/websocketMiddleware';
+import { chatService } from '../api/chat.service';
 import { Message } from '../types/chat.types';
-import { getToken } from '../utils/auth.utils';
 
 export const useChat = () => {
   const dispatch = useAppDispatch();
@@ -22,19 +21,32 @@ export const useChat = () => {
     error 
   } = useAppSelector(state => state.chat);
   const { selectedConnection } = useAppSelector(state => state.database);
+  const [isConnected, setIsConnected] = useState(false);
 
-  const initializeWebSocket = useCallback(() => {
-    const token = getToken();
-    if (token) {
-      dispatch(wsConnect());
-    }
-  }, [dispatch]);
+  // Initialize WebSocket connection
+  const initializeWebSocket = useCallback(async () => {
+    const connected = await chatService.connect();
+    setIsConnected(connected);
+    return connected;
+  }, []);
+
+  // Connect when the hook is first used
+  useEffect(() => {
+    initializeWebSocket();
+    
+    // Clean up on unmount
+    return () => {
+      // Don't disconnect the WebSocket since we might want to keep it active
+      // Just do any other cleanup needed
+    };
+  }, [initializeWebSocket]);
 
   const startNewSession = useCallback(async (title?: string) => {
     try {
-      const result = await dispatch(createChatSession(title)).unwrap();
+      const result = await dispatch(createChatSession(title || 'New Chat')).unwrap();
       return result;
     } catch (error) {
+      console.error("Failed to create chat session:", error);
       return null;
     }
   }, [dispatch]);
@@ -44,18 +56,20 @@ export const useChat = () => {
   }, [dispatch]);
 
   const sendMessage = useCallback((content: string) => {
-    // Add user message to chat
-    dispatch(addMessage({
-      id: Date.now().toString(),
-      role: 'user',
-      content,
-      timestamp: new Date().toISOString()
-    }));
-    
-    // Send message to backend through WebSocket
+    // Add user message to chat (now done in chatService)
     const dbId = selectedConnection?.id;
-    dispatch(wsSendQuery(content, dbId));
-  }, [dispatch, selectedConnection]);
+    
+    // Connect if not already connected
+    if (!isConnected) {
+      initializeWebSocket().then(connected => {
+        if (connected) {
+          chatService.sendQuery(content, dbId);
+        }
+      });
+    } else {
+      chatService.sendQuery(content, dbId);
+    }
+  }, [isConnected, initializeWebSocket, selectedConnection?.id]);
 
   const removeSession = useCallback((sessionId: string) => {
     dispatch(deleteSession(sessionId));
@@ -79,6 +93,7 @@ export const useChat = () => {
     messages,
     status,
     error,
+    isConnected,
     initializeWebSocket,
     startNewSession,
     switchSession,

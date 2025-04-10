@@ -53,6 +53,39 @@ const chatSlice = createSlice({
     // Add a message to the chat
     addMessage: (state, action: PayloadAction<Message>) => {
       const message = action.payload;
+      
+      // Check if this is an update to an existing streaming message
+      if (message.isStreaming && message.role === 'assistant') {
+        const existingMsgIndex = state.messages.findIndex(
+          m => m.role === 'assistant' && m.isStreaming
+        );
+        
+        if (existingMsgIndex !== -1) {
+          // Update existing streaming message
+          state.messages[existingMsgIndex] = message;
+          
+          // If we have a current session, update it too
+          if (state.currentSessionId) {
+            const sessionIndex = state.sessions.findIndex(s => s.id === state.currentSessionId);
+            if (sessionIndex !== -1) {
+              const msgIndex = state.sessions[sessionIndex].messages.findIndex(
+                m => m.role === 'assistant' && m.isStreaming
+              );
+              
+              if (msgIndex !== -1) {
+                state.sessions[sessionIndex].messages[msgIndex] = message;
+              } else {
+                state.sessions[sessionIndex].messages.push(message);
+              }
+              
+              state.sessions[sessionIndex].updatedAt = new Date().toISOString();
+            }
+          }
+          return;
+        }
+      }
+      
+      // Normal case - add new message
       state.messages.push(message);
       
       // If we have a current session, update it too
@@ -81,6 +114,8 @@ const chatSlice = createSlice({
     }>) => {
       if (action.payload.status === QueryStatus.PROCESSING) {
         state.status = 'loading';
+      } else if (action.payload.status === QueryStatus.STREAMING) {
+        state.status = 'streaming';
       } else if (action.payload.status === QueryStatus.COMPLETED) {
         state.status = 'success';
       } else if (action.payload.status === QueryStatus.FAILED) {
@@ -119,6 +154,56 @@ const chatSlice = createSlice({
       }
     },
     
+    // Update an existing message (e.g., for streaming)
+    updateMessage: (state, action: PayloadAction<{ id: string; updates: Partial<Message> }>) => {
+      const { id, updates } = action.payload;
+      
+      // Find and update the message in state.messages
+      const messageIndex = state.messages.findIndex(m => m.id === id);
+      if (messageIndex !== -1) {
+        state.messages[messageIndex] = { ...state.messages[messageIndex], ...updates };
+      }
+      
+      // Also update in the session if applicable
+      if (state.currentSessionId) {
+        const sessionIndex = state.sessions.findIndex(s => s.id === state.currentSessionId);
+        if (sessionIndex !== -1) {
+          const sessionMessageIndex = state.sessions[sessionIndex].messages.findIndex(m => m.id === id);
+          if (sessionMessageIndex !== -1) {
+            state.sessions[sessionIndex].messages[sessionMessageIndex] = {
+              ...state.sessions[sessionIndex].messages[sessionMessageIndex],
+              ...updates
+            };
+          }
+        }
+      }
+    },
+    
+    // Finish streaming for a message
+    finishStreamingMessage: (state, action: PayloadAction<string>) => {
+      const messageId = action.payload;
+      
+      // Find streaming message by ID
+      const messageIndex = state.messages.findIndex(m => m.id === messageId);
+      if (messageIndex !== -1 && state.messages[messageIndex].isStreaming) {
+        state.messages[messageIndex].isStreaming = false;
+      }
+      
+      // Also update in the session
+      if (state.currentSessionId) {
+        const sessionIndex = state.sessions.findIndex(s => s.id === state.currentSessionId);
+        if (sessionIndex !== -1) {
+          const sessionMessageIndex = state.sessions[sessionIndex].messages.findIndex(m => m.id === messageId);
+          if (sessionMessageIndex !== -1) {
+            state.sessions[sessionIndex].messages[sessionMessageIndex].isStreaming = false;
+          }
+        }
+      }
+      
+      // Update status to success
+      state.status = 'success';
+    },
+    
     // Clear error
     clearError: (state) => {
       state.error = null;
@@ -137,9 +222,11 @@ const chatSlice = createSlice({
 export const {
   setCurrentSession,
   addMessage,
+  updateMessage,
   updateQueryStatus,
   clearMessages,
   deleteSession,
+  finishStreamingMessage,
   clearError,
 } = chatSlice.actions;
 

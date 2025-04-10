@@ -11,6 +11,7 @@ export interface Message {
   queryResult?: QueryResponse;
   error?: string;
   contextSwitch?: { dbId: number };
+  isStreaming?: boolean;
 }
 
 export interface ChatSession {
@@ -25,6 +26,6 @@ export interface ChatState {
   sessions: ChatSession[];
   currentSessionId: string | null;
   messages: Message[];
-  status: 'idle' | 'loading' | 'success' | 'error';
+  status: 'idle' | 'loading' | 'success' | 'error' | 'streaming';
   error: string | null;
 }
