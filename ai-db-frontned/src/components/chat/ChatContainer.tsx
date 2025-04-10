@@ -8,63 +8,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Lightbulb, Sparkles, ArrowDown, AlertTriangle } from 'lucide-react';
 import { cn } from '../../utils/format.utils';
 
-const { currentSessionId } = useAppSelector(state => state.chat);
-const { startNewSession } = useChat();
-
-// Loading spinner animation
-const LoadingSpinner: React.FC = () => (
-  <div className="flex items-center justify-center">
-    <div className="relative h-8 w-8">
-      <div className="absolute inset-0 rounded-full border-2 border-zinc-700"></div>
-      <div className="absolute inset-0 rounded-full border-2 border-t-blue-500 animate-spin"></div>
-    </div>
-  </div>
-);
-
-// Empty chat state
-const EmptyChatState: React.FC<{ onSendExample: (text: string) => void }> = ({ onSendExample }) => {
-  const examples = [
-    "Show me all users who joined in the last month",
-    "What products have the highest profit margin?",
-    "Calculate total sales by region for Q1",
-    "Find customers who haven't placed an order in 6 months"
-  ];
-
-  return (
-    <div className="flex flex-col items-center justify-center h-full text-center px-4 py-12 max-w-3xl mx-auto">
-      <div className="w-20 h-20 rounded-full bg-blue-600/10 flex items-center justify-center mb-6">
-        <Sparkles className="w-10 h-10 text-blue-500" />
-      </div>
-      <h2 className="text-2xl font-bold text-zinc-100 mb-3">Start your database conversation</h2>
-      <p className="text-zinc-400 mb-8 max-w-lg">
-        Ask questions about your database in natural language. Our AI will generate SQL, run the query, and explain the results.
-      </p>
-      
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-xl">
-        {examples.map((example, index) => (
-          <button
-            key={index}
-            className="text-left p-4 bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-300 transition-colors"
-            onClick={() => onSendExample(example)}
-          >
-            <div className="flex items-center gap-2 mb-1">
-              <Lightbulb className="w-4 h-4 text-blue-400" />
-              <span className="text-xs text-blue-400">Example</span>
-            </div>
-            <span className="text-sm">{example}</span>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-};
-
 const ChatContainer: React.FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const { messages, status } = useAppSelector(state => state.chat);
+  const { messages, status, currentSessionId } = useAppSelector(state => state.chat);
   const { selectedConnection } = useAppSelector(state => state.database);
-  const { sendMessage } = useChat();
+  const { sendMessage, startNewSession } = useChat();
   const [showScrollButton, setShowScrollButton] = useState(false);
   
   // Auto-scroll to bottom when new messages arrive
@@ -109,6 +58,54 @@ const ChatContainer: React.FC = () => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
+  };
+
+  // Loading spinner animation
+  const LoadingSpinner: React.FC = () => (
+    <div className="flex items-center justify-center">
+      <div className="relative h-8 w-8">
+        <div className="absolute inset-0 rounded-full border-2 border-zinc-700"></div>
+        <div className="absolute inset-0 rounded-full border-2 border-t-blue-500 animate-spin"></div>
+      </div>
+    </div>
+  );
+
+  // Empty chat state
+  const EmptyChatState: React.FC<{ onSendExample: (text: string) => void }> = ({ onSendExample }) => {
+    const examples = [
+      "Show me all users who joined in the last month",
+      "What products have the highest profit margin?",
+      "Calculate total sales by region for Q1",
+      "Find customers who haven't placed an order in 6 months"
+    ];
+
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-center px-4 py-12 max-w-3xl mx-auto">
+        <div className="w-20 h-20 rounded-full bg-blue-600/10 flex items-center justify-center mb-6">
+          <Sparkles className="w-10 h-10 text-blue-500" />
+        </div>
+        <h2 className="text-2xl font-bold text-zinc-100 mb-3">Start your database conversation</h2>
+        <p className="text-zinc-400 mb-8 max-w-lg">
+          Ask questions about your database in natural language. Our AI will generate SQL, run the query, and explain the results.
+        </p>
+        
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-xl">
+          {examples.map((example, index) => (
+            <button
+              key={index}
+              className="text-left p-4 bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-300 transition-colors"
+              onClick={() => onSendExample(example)}
+            >
+              <div className="flex items-center gap-2 mb-1">
+                <Lightbulb className="w-4 h-4 text-blue-400" />
+                <span className="text-xs text-blue-400">Example</span>
+              </div>
+              <span className="text-sm">{example}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
   };
 
   return (
