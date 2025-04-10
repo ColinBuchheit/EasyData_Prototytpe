@@ -1,10 +1,17 @@
-// First, let's implement a new ChatService class to handle WebSocket connections in a more robust way
+// src/api/chat.service.ts
 import { v4 as uuidv4 } from 'uuid';
 import { addMessage, updateQueryStatus } from '../store/slices/chatSlice';
 import { addProgressUpdate } from '../store/slices/querySlice';
 import { store } from '../store';
-import { getToken } from '../utils/auth.utils';
-import { QueryStatus, ProgressUpdateType } from '../types/query.types';
+import { getToken } from '../utils/authService';
+import { QueryStatus, QueryResponse, ProgressUpdateType } from '../types/query.types';
+
+export interface WebSocketMessage {
+  type: string;
+  data?: any;
+  message?: string;
+  error?: string;
+}
 
 export class ChatService {
   private socket: WebSocket | null = null;
@@ -14,6 +21,7 @@ export class ChatService {
   private messageQueue: Array<{type: string, data: any}> = [];
   private isConnecting = false;
   private isAuthenticated = false;
+  private listeners: Map<string, Array<(data: any) => void>> = new Map();
 
   constructor(private url: string) {}
 
@@ -58,6 +66,9 @@ export class ChatService {
             if (msg) this.sendMessage(msg.type, msg.data);
           }
           
+          // Notify listeners
+          this.notifyListeners('connected', { connected: true });
+          
           resolve(true);
         };
 
@@ -67,6 +78,9 @@ export class ChatService {
           this.isConnecting = false;
           this.isAuthenticated = false;
           this.attemptReconnect();
+          
+          // Notify listeners
+          this.notifyListeners('disconnected', { connected: false });
           
           // Notify the user of disconnection
           store.dispatch(updateQueryStatus({ 
@@ -79,6 +93,10 @@ export class ChatService {
           console.error('WebSocket error:', error);
           this.isConnecting = false;
           this.isAuthenticated = false;
+          
+          // Notify listeners
+          this.notifyListeners('error', { error });
+          
           resolve(false);
         };
 
@@ -131,6 +149,10 @@ export class ChatService {
     return this.sendMessage('query', { task, dbId });
   }
 
+  public sendNaturalLanguageQuery(task: string, dbId?: number): boolean {
+    return this.sendQuery(task, dbId);
+  }
+
   public disconnect(): void {
     if (this.socket) {
       this.socket.close();
@@ -144,11 +166,47 @@ export class ChatService {
     
     this.messageQueue = [];
     this.isAuthenticated = false;
+    
+    // Notify listeners
+    this.notifyListeners('disconnected', { connected: false });
+  }
+
+  // Add event listener
+  public addEventListener(event: string, callback: (data: any) => void): void {
+    if (!this.listeners.has(event)) {
+      this.listeners.set(event, []);
+    }
+    
+    this.listeners.get(event)?.push(callback);
+  }
+
+  // Remove event listener
+  public removeEventListener(event: string, callback: (data: any) => void): void {
+    if (!this.listeners.has(event)) return;
+    
+    const callbacks = this.listeners.get(event);
+    if (callbacks) {
+      const index = callbacks.indexOf(callback);
+      if (index !== -1) {
+        callbacks.splice(index, 1);
+      }
+    }
+  }
+
+  // Notify listeners
+  private notifyListeners(event: string, data: any): void {
+    const callbacks = this.listeners.get(event);
+    if (callbacks) {
+      callbacks.forEach(callback => callback(data));
+    }
   }
 
   private handleMessage(event: MessageEvent): void {
     try {
-      const message = JSON.parse(event.data);
+      const message: WebSocketMessage = JSON.parse(event.data);
+
+      // Notify any registered listeners for this message type
+      this.notifyListeners(message.type, message.data);
 
       switch (message.type) {
         case 'processing':
@@ -211,7 +269,7 @@ export class ChatService {
           store.dispatch(addMessage({
             id: uuidv4(),
             role: 'assistant',
-            content: message.message,
+            content: message.message || '',
             timestamp: new Date().toISOString(),
             contextSwitch: message.data
           }));
@@ -241,8 +299,16 @@ export class ChatService {
       this.connect();
     }, delay);
   }
+  
+  // Check if connected
+  public isConnected(): boolean {
+    return this.socket?.readyState === WebSocket.OPEN;
+  }
 }
 
 // Create and export a singleton instance
 const WS_URL = import.meta.env.VITE_WS_URL || `ws://${window.location.hostname}:3000/ws`;
 export const chatService = new ChatService(WS_URL);
+
+// Export default for backward compatibility
+export default chatService;

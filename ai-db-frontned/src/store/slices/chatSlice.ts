@@ -1,7 +1,6 @@
 // src/store/slices/chatSlice.ts
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
 import { v4 as uuidv4 } from 'uuid';
-import websocketService from '../../api/websocket.api';
 import {
   ChatState,
   Message,

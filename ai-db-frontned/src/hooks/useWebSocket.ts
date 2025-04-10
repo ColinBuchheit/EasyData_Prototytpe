@@ -1,7 +1,7 @@
 // src/hooks/useWebSocket.ts
 import { useState, useEffect, useCallback } from 'react';
-import { websocketService } from '../api/websocket.api';
-import { getToken } from '../utils/auth.utils';
+import { chatService } from '../api/chat.service';
+import { getToken } from '../utils/authService';
 
 type WebSocketStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
@@ -27,7 +27,7 @@ export const useWebSocket = (): UseWebSocketReturn => {
     }
     
     try {
-      const connected = await websocketService.connect(token);
+      const connected = await chatService.connect();
       setStatus(connected ? 'connected' : 'error');
       return connected;
     } catch (error) {
@@ -39,18 +39,35 @@ export const useWebSocket = (): UseWebSocketReturn => {
 
   // Disconnect from WebSocket
   const disconnect = useCallback(() => {
-    websocketService.disconnect();
+    chatService.disconnect();
     setStatus('disconnected');
   }, []);
 
   // Send a message through WebSocket
   const sendMessage = useCallback((type: string, data: any) => {
-    return websocketService.sendMessage(type, data);
+    return chatService.sendMessage(type, data);
   }, []);
 
   // Send a query through WebSocket
   const sendQuery = useCallback((task: string, dbId?: number) => {
-    return websocketService.sendNaturalLanguageQuery(task, dbId);
+    return chatService.sendQuery(task, dbId);
+  }, []);
+
+  // Set up WebSocket event listeners
+  useEffect(() => {
+    const handleConnected = () => setStatus('connected');
+    const handleDisconnected = () => setStatus('disconnected');
+    const handleError = () => setStatus('error');
+    
+    chatService.addEventListener('connected', handleConnected);
+    chatService.addEventListener('disconnected', handleDisconnected);
+    chatService.addEventListener('error', handleError);
+    
+    return () => {
+      chatService.removeEventListener('connected', handleConnected);
+      chatService.removeEventListener('disconnected', handleDisconnected);
+      chatService.removeEventListener('error', handleError);
+    };
   }, []);
 
   // Connect on mount if token exists
