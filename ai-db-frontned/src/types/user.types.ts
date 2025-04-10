@@ -1,5 +1,6 @@
 // src/types/user.types.ts
 export interface UserProfile {
+    notificationSettings: UserProfile | null;
     preferences: UserProfile | null;
     userId: number;
     firstName?: string;

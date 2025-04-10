@@ -1,7 +1,7 @@
 // src/store/middleware/websocketMiddleware.ts
 import { Middleware } from 'redux';
-import websocketService from '../../api/websocket.api';
-import { getToken } from '../../utils/auth.utils';
+import { chatService } from '../../api/chat.service';
+import { getToken } from '../../utils/authService';
 import { addMessage, updateQueryStatus } from '../slices/chatSlice';
 import { addProgressUpdate } from '../slices/querySlice';
 import { QueryStatus } from '../../types/query.types';
@@ -74,8 +74,8 @@ const middleware: Middleware = ({ dispatch }) =>
         // Connect to WebSocket with auth token
         const token = getToken();
         if (token) {
-          websocketService.connect(token)
-            .then((connected) => {
+          chatService.connect()
+            .then((connected: boolean) => {
               if (connected) {
                 dispatch({ type: 'ws/connected' });
               } else {
@@ -86,13 +86,13 @@ const middleware: Middleware = ({ dispatch }) =>
         break;
         
       case WS_DISCONNECT:
-        websocketService.disconnect();
+        chatService.disconnect();
         dispatch({ type: 'ws/disconnected' });
         break;
         
       case WS_SEND_MESSAGE:
         const msgAction = action as WSSendMessageAction;
-        websocketService.sendMessage(msgAction.payload.type, msgAction.payload.data);
+        chatService.sendMessage(msgAction.payload.type, msgAction.payload.data);
         break;
         
       case WS_SEND_QUERY:
@@ -112,7 +112,7 @@ const middleware: Middleware = ({ dispatch }) =>
         }));
         
         // Send query via WebSocket
-        websocketService.sendNaturalLanguageQuery(
+        chatService.sendNaturalLanguageQuery(
           queryAction.payload.task, 
           queryAction.payload.dbId
         );

@@ -2,7 +2,7 @@
 import apiClient from '../api/index';
 import { addToast } from '../store/slices/uiSlice';
 import { store } from '../store';
-import { getToken } from './auth.utils';
+import { getToken } from './authService';
 
 export interface HealthCheckResult {
   service: string;

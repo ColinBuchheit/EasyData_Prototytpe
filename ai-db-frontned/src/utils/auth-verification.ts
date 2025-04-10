@@ -1,20 +1,13 @@
-// src/utils/authService.ts
+// src/utils/auth-verification.ts
 import { store } from '../store';
 import { setUser, logout as logoutAction } from '../store/slices/authSlice';
 import apiClient from '../api';
 import * as AuthUtils from './auth-utils';
 
-// Re-export token utilities from auth-utils
-export const getToken = AuthUtils.getToken;
-export const getRefreshToken = AuthUtils.getRefreshToken;
-export const setToken = AuthUtils.setToken;
-export const setRefreshToken = AuthUtils.setRefreshToken;
-export const clearTokens = AuthUtils.clearTokens;
-export const parseToken = AuthUtils.parseToken;
-export const isTokenExpired = AuthUtils.isTokenExpired;
-export const isAuthenticated = AuthUtils.isAuthenticated;
-
-// Auth Verification
+/**
+ * Verifies authentication on application startup
+ * Returns true if authentication is valid, false otherwise
+ */
 export const verifyAuthOnStartup = async (): Promise<boolean> => {
   // Get token from storage
   const token = AuthUtils.getToken();
@@ -26,8 +19,18 @@ export const verifyAuthOnStartup = async (): Promise<boolean> => {
     return false;
   }
   
-  // If token is expired, clear tokens and return false
+  // If token is expired, check for refresh token
   if (AuthUtils.isTokenExpired(token)) {
+    const refreshToken = AuthUtils.getRefreshToken();
+    if (refreshToken) {
+      // Try to refresh the token
+      const refreshed = await tryRefreshToken(refreshToken);
+      if (refreshed) {
+        return true;
+      }
+    }
+    
+    // If refresh failed or no refresh token, clear tokens and return false
     AuthUtils.clearTokens();
     store.dispatch(setUser(null));
     return false;
@@ -58,31 +61,40 @@ export const verifyAuthOnStartup = async (): Promise<boolean> => {
   }
 };
 
-// Logout
-export const logout = async (): Promise<boolean> => {
+/**
+ * Attempt to refresh the token using a refresh token
+ * Returns true if token was refreshed successfully
+ */
+const tryRefreshToken = async (refreshToken: string): Promise<boolean> => {
   try {
-    // Clear tokens first to prevent additional calls
-    AuthUtils.clearTokens();
+    const response = await apiClient.post('/auth/refresh', { refreshToken });
     
-    // Then try to notify server (but don't wait for response)
-    await apiClient.post('/auth/logout').catch(() => {
-      // Ignore errors - we're already logging out
-    });
+    if (response.data && response.data.success && response.data.token) {
+      // Update tokens and user
+      AuthUtils.clearTokens(); // Clear old tokens first
+      AuthUtils.setToken(response.data.token);
+      
+      if (response.data.refreshToken) {
+        AuthUtils.setRefreshToken(response.data.refreshToken);
+      }
+      
+      if (response.data.user) {
+        store.dispatch(setUser(response.data.user));
+      }
+      
+      return true;
+    }
     
-    // Update Redux state
-    store.dispatch(setUser(null));
-    store.dispatch(logoutAction());
-    
-    return true;
+    return false;
   } catch (error) {
-    // Ensure tokens and state are cleared regardless of API error
-    AuthUtils.clearTokens();
-    store.dispatch(setUser(null));
-    store.dispatch(logoutAction());
+    console.error('Token refresh failed:', error);
     return false;
   }
 };
 
+/**
+ * Safer logout function that ensures tokens are cleared even if API call fails
+ */
 export const safeLogout = (): void => {
   const token = AuthUtils.getToken();
   
@@ -104,3 +116,10 @@ export const safeLogout = (): void => {
   store.dispatch(setUser(null));
   store.dispatch(logoutAction());
 };
+
+/**
+ * Verify token specifically for WebSocket connections
+ * Returns true if token is valid, false otherwise
+ * This is a simplified check that doesn't hit the server
+ */
+export const verifyTokenForWebsocket = AuthUtils.verifyTokenForWebsocket;

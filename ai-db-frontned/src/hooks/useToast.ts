@@ -14,7 +14,9 @@ export const useToast = () => {
     type: ToastType = 'info', 
     duration: number = 5000
   ) => {
-    const id = dispatch(addToast({ type, message, duration })).payload.id;
+    const result = dispatch(addToast({ type, message, duration }));
+    // Extract the ID from the state returned by the reducer
+    const id = (result.payload as any).id;
     
     // Auto-remove toast after duration
     if (duration > 0) {

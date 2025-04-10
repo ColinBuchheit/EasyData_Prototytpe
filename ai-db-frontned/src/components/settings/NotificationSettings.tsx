@@ -22,8 +22,15 @@ const NotificationSettings: React.FC = () => {
   
   // Initialize settings from user preferences
   useEffect(() => {
-    if (profile && profile.preferences && profile.preferences.notificationSettings) {
-      setSettings(profile.preferences.notificationSettings);
+    // Using optional chaining for type safety
+    if (profile && profile.preferences) {
+      const userSettings = profile.preferences.notificationSettings;
+      if (userSettings) {
+        setSettings(prevSettings => ({
+          ...prevSettings,
+          ...userSettings
+        }));
+      }
     }
   }, [profile]);
   

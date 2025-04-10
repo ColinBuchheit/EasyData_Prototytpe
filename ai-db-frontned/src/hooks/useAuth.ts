@@ -3,7 +3,7 @@ import { useEffect } from 'react';
 import { useAppDispatch, useAppSelector } from './useRedux';
 import { login, logout, setUser } from '../store/slices/authSlice';
 import { LoginRequest } from '../types/auth.types';
-import { clearTokens, getToken } from '../utils/auth.utils';
+import { clearTokens, getToken } from '../utils/authService';
 import { addToast } from '../store/slices/uiSlice';
 import { authApi } from '../api/auth.api';
 

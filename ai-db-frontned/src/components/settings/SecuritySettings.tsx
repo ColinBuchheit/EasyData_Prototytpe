@@ -117,7 +117,7 @@ const SecuritySettings: React.FC = () => {
           message: 'Password changed successfully',
         }));
       } else {
-        throw new Error(result.message || 'Failed to change password');
+        throw new Error('Failed to change password');
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to change password';

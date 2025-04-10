@@ -1,7 +1,7 @@
 // src/api/chat.service.ts
 import { v4 as uuidv4 } from 'uuid';
 import { addMessage, updateQueryStatus } from '../store/slices/chatSlice';
-import { addProgressUpdate } from '../store/slices/querySlice';
+import { addProgressUpdate, clearProgressUpdates } from '../store/slices/querySlice';
 import { store } from '../store';
 import { getToken } from '../utils/authService';
 import { QueryStatus, ProgressUpdateType } from '../types/query.types';
@@ -19,6 +19,7 @@ export class ChatService {
   private reconnectAttempts = 0;
   private readonly maxReconnectAttempts = 5;
   private reconnectTimeout: NodeJS.Timeout | null = null;
+  private pingInterval: NodeJS.Timeout | null = null;
   private messageQueue: Array<{type: string, data: any}> = [];
   private isConnecting = false;
   private listeners: Map<string, Array<(data: any) => void>> = new Map();
@@ -36,6 +37,9 @@ export class ChatService {
           if (this.socket?.readyState === WebSocket.OPEN) {
             clearInterval(checkInterval);
             resolve(true);
+          } else if (!this.isConnecting) {
+            clearInterval(checkInterval);
+            resolve(false);
           }
         }, 100);
       });
@@ -59,6 +63,9 @@ export class ChatService {
           this.reconnectAttempts = 0;
           this.isConnecting = false;
           
+          // Start ping interval to keep connection alive
+          this.startPingInterval();
+          
           // Send any queued messages
           while (this.messageQueue.length > 0) {
             const msg = this.messageQueue.shift();
@@ -71,20 +78,32 @@ export class ChatService {
           resolve(true);
         };
 
-        this.socket.onclose = () => {
-          console.log('WebSocket disconnected');
+        this.socket.onclose = (event) => {
+          console.log(`WebSocket disconnected. Code: ${event.code}, Reason: ${event.reason}`);
           this.socket = null;
           this.isConnecting = false;
+          this.stopPingInterval();
           this.attemptReconnect();
           
           // Notify listeners
-          this.notifyListeners('disconnected', { connected: false });
+          this.notifyListeners('disconnected', { 
+            connected: false,
+            code: event.code,
+            reason: event.reason 
+          });
           
-          // Notify the user of disconnection
-          store.dispatch(updateQueryStatus({ 
-            status: QueryStatus.FAILED, 
-            message: 'Connection lost. Attempting to reconnect...' 
-          }));
+          // Notify the user of disconnection only if it was an abnormal closure
+          if (event.code !== 1000 && event.code !== 1001) {
+            store.dispatch(updateQueryStatus({ 
+              status: QueryStatus.FAILED, 
+              message: 'Connection lost. Attempting to reconnect...' 
+            }));
+            
+            store.dispatch(addToast({
+              type: 'warning',
+              message: 'Connection to server lost. Attempting to reconnect...'
+            }));
+          }
         };
 
         this.socket.onerror = (error) => {
@@ -134,15 +153,27 @@ export class ChatService {
       message: 'Processing your query...' 
     }));
     
-    // Add user message to chat
-    store.dispatch(addMessage({
-      id: uuidv4(),
-      role: 'user',
-      content: task,
-      timestamp: new Date().toISOString()
-    }));
+    // Clear any previous progress updates
+    store.dispatch(clearProgressUpdates());
     
-    return this.sendMessage('query', { task, dbId });
+    // Add user message to chat if not already added (could be added in useChat.ts)
+    const state = store.getState();
+    const lastMessage = state.chat.messages[state.chat.messages.length - 1];
+    
+    if (!lastMessage || lastMessage.role !== 'user' || lastMessage.content !== task) {
+      store.dispatch(addMessage({
+        id: uuidv4(),
+        role: 'user',
+        content: task,
+        timestamp: new Date().toISOString()
+      }));
+    }
+    
+    return this.sendMessage('query', { 
+      task, 
+      dbId, 
+      sessionId: state.chat.currentSessionId 
+    });
   }
 
   public sendNaturalLanguageQuery(task: string, dbId?: number): boolean {
@@ -160,10 +191,33 @@ export class ChatService {
       this.reconnectTimeout = null;
     }
     
+    this.stopPingInterval();
     this.messageQueue = [];
     
     // Notify listeners
     this.notifyListeners('disconnected', { connected: false });
+  }
+
+  // Ping to keep connection alive
+  public startPingInterval(): void {
+    if (this.pingInterval) {
+      clearInterval(this.pingInterval);
+    }
+    
+    // Send ping every 30 seconds to keep connection alive
+    this.pingInterval = setInterval(() => {
+      if (this.isConnected()) {
+        this.sendMessage('ping', { timestamp: Date.now() });
+      }
+    }, 30000);
+  }
+
+  // Stop ping interval
+  public stopPingInterval(): void {
+    if (this.pingInterval) {
+      clearInterval(this.pingInterval);
+      this.pingInterval = null;
+    }
   }
 
   // Add event listener
@@ -204,6 +258,11 @@ export class ChatService {
       this.notifyListeners(message.type, message.data);
 
       switch (message.type) {
+        case 'pong':
+          // Handle pong response (connection heartbeat)
+          console.debug('Received pong from server', message.data);
+          break;
+
         case 'processing':
           store.dispatch(updateQueryStatus({ 
             status: QueryStatus.PROCESSING, 
@@ -218,12 +277,24 @@ export class ChatService {
               message: message.data.message || 'Processing...',
               details: message.data.details
             }));
+            
+            // If the progress update is an error, also update query status
+            if (message.data.type === ProgressUpdateType.ERROR) {
+              store.dispatch(updateQueryStatus({ 
+                status: QueryStatus.FAILED,
+                message: message.data.message || 'An error occurred'
+              }));
+            }
           }
           break;
 
         case 'streamResponse':
           // Handle streaming response
           if (message.data && message.data.content) {
+            store.dispatch(updateQueryStatus({ 
+              status: QueryStatus.STREAMING
+            }));
+            
             store.dispatch(addMessage({
               id: message.data.id || uuidv4(),
               role: 'assistant',
@@ -235,14 +306,32 @@ export class ChatService {
           break;
 
         case 'queryResult':
-          store.dispatch(addMessage({
-            id: uuidv4(),
-            role: 'assistant',
-            content: message.data.explanation || 'Query executed successfully',
-            timestamp: new Date().toISOString(),
-            queryResult: message.data,
-            isStreaming: false
-          }));
+          // If a streaming message was in progress, mark it as complete
+          const state = store.getState();
+          const lastMessage = state.chat.messages[state.chat.messages.length - 1];
+          
+          if (lastMessage && lastMessage.role === 'assistant' && lastMessage.isStreaming) {
+            // Final response - replace streaming message
+            store.dispatch(addMessage({
+              id: lastMessage.id, // Use same ID to replace
+              role: 'assistant',
+              content: message.data.explanation || lastMessage.content || 'Query executed successfully',
+              timestamp: new Date().toISOString(),
+              queryResult: message.data,
+              isStreaming: false
+            }));
+          } else {
+            // No streaming message - add new one
+            store.dispatch(addMessage({
+              id: uuidv4(),
+              role: 'assistant',
+              content: message.data.explanation || 'Query executed successfully',
+              timestamp: new Date().toISOString(),
+              queryResult: message.data,
+              isStreaming: false
+            }));
+          }
+          
           store.dispatch(updateQueryStatus({ status: QueryStatus.COMPLETED }));
           break;
 
@@ -254,20 +343,30 @@ export class ChatService {
             timestamp: new Date().toISOString(),
             error: message.error
           }));
+          
           store.dispatch(updateQueryStatus({ 
             status: QueryStatus.FAILED,
             message: message.message || 'An error occurred'
           }));
+          
+          // Show toast for severe errors
+          if (message.error && message.error.includes('database')) {
+            store.dispatch(addToast({
+              type: 'error',
+              message: message.message || 'Database error occurred'
+            }));
+          }
           break;
 
         case 'contextSwitch':
           store.dispatch(addMessage({
             id: uuidv4(),
-            role: 'assistant',
-            content: message.message || '',
+            role: 'system',
+            content: message.message || 'Switched database context',
             timestamp: new Date().toISOString(),
             contextSwitch: message.data
           }));
+          
           store.dispatch(updateQueryStatus({ status: QueryStatus.COMPLETED }));
           break;
 

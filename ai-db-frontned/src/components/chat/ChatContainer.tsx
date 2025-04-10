@@ -1,13 +1,15 @@
 // src/components/chat/ChatContainer.tsx
 import React, { useRef, useEffect, useState } from 'react';
 import { useAppSelector } from '../../hooks/useRedux';
-import { Message } from '../../types/chat.types';
 import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
 import useChat from '../../hooks/useChat';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Lightbulb, Sparkles, ArrowDown, AlertTriangle } from 'lucide-react';
 import { cn } from '../../utils/format.utils';
+
+const { currentSessionId } = useAppSelector(state => state.chat);
+const { startNewSession } = useChat();
 
 // Loading spinner animation
 const LoadingSpinner: React.FC = () => (
@@ -71,6 +73,13 @@ const ChatContainer: React.FC = () => {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages]);
+
+  useEffect(() => {
+    // Ensure we have a session when component mounts
+    if (!currentSessionId && messages.length === 0) {
+      startNewSession("New Chat");
+    }
+  }, [currentSessionId, messages.length, startNewSession]);
   
   // Show scroll button when user scrolls up
   useEffect(() => {

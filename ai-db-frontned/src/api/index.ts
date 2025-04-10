@@ -1,16 +1,17 @@
 // src/api/index.ts
 import axios, { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse, AxiosError } from 'axios';
-import { getToken, clearTokens } from '../utils/auth.utils';
+import { getToken, clearTokens } from '../utils/authService';
 
-// Augment the ImportMeta interface from Vite
-declare global {
-  interface ImportMeta {
-    readonly env: {
-      readonly VITE_API_URL: string;
-      readonly VITE_WS_URL: string;
-      readonly [key: string]: string | undefined;
-    };
-  }
+// Augment the ImportMetaEnv interface from Vite
+interface ImportMetaEnv {
+  readonly VITE_API_URL: string;
+  readonly VITE_WS_URL: string;
+  readonly [key: string]: string | undefined;
+}
+
+// Tell TypeScript about the ImportMeta interface
+declare interface ImportMeta {
+  readonly env: ImportMetaEnv;
 }
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';

@@ -19,8 +19,11 @@ const initialState: ChatState = {
 // Create a new chat session
 export const createChatSession = createAsyncThunk(
   'chat/createChatSession',
-  async (title: string = 'New Chat', { getState }) => {
-    const sessionId = uuidv4();
+  async (params: { title: string; sessionId: string } | string, { getState }) => {
+    // Handle both string and object params
+    const title = typeof params === 'string' ? params : params.title;
+    const sessionId = typeof params === 'string' ? uuidv4() : params.sessionId;
+    
     const session: ChatSession = {
       id: sessionId,
       title,

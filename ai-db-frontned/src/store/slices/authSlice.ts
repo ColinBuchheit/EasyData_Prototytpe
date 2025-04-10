@@ -7,15 +7,15 @@ import {
   RegisterRequest,
   PasswordResetRequest
 } from '../../types/auth.types';
-import { setToken, clearTokens, getToken, getRefreshToken, setRefreshToken } from '../../utils/auth.utils';
-import { fetchUserProfile } from './userSlice';
+import * as AuthUtils from '../../utils/auth-utils';
 import { safeLogout } from '../../utils/auth-verification';
+import { fetchUserProfile } from './userSlice';
 
 const initialState: AuthState = {
   user: null,
-  token: getToken(),
-  refreshToken: getRefreshToken(),
-  isAuthenticated: !!getToken(),
+  token: AuthUtils.getToken(),
+  refreshToken: AuthUtils.getRefreshToken(),
+  isAuthenticated: !!AuthUtils.getToken(),
   loading: false,
   error: null,
 };
@@ -27,9 +27,9 @@ export const login = createAsyncThunk(
     const response = await authApi.login(credentials);
     if (response.success) {
       // Set tokens
-      setToken(response.token!);
+      AuthUtils.setToken(response.token!);
       if (response.refreshToken) {
-        setRefreshToken(response.refreshToken);
+        AuthUtils.setRefreshToken(response.refreshToken);
       }
       
       // Fetch user profile after successful login
@@ -65,7 +65,7 @@ export const logout = createAsyncThunk(
       return { success: true };
     } catch (error: any) {
       // Even if API call fails, we should still clear local tokens
-      clearTokens();
+      AuthUtils.clearTokens();
       return rejectWithValue(error.response?.data?.message || error.message || 'Logout failed');
     }
   }

@@ -8,7 +8,7 @@ import { useTheme } from './hooks/useTheme';
 import ToastContainer from './components/common/Toast';
 import { checkApiHealth } from './utils/api-health';
 import { verifyAuthOnStartup } from './utils/auth-verification';
-import { getToken } from './utils/auth.utils';
+import { getToken } from './utils/authService';
 
 const App: React.FC = () => {
   const dispatch = useAppDispatch();

@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { UserPlus, Mail, Lock, User, CheckCircle, AlertCircle, ArrowLeft, Database, Sparkles } from 'lucide-react';
+import { UserPlus, Mail, Lock, User, AlertCircle, ArrowLeft, Database, Sparkles } from 'lucide-react';
 import { useAppDispatch, useAppSelector } from '../hooks/useRedux';
 import { register } from '../store/slices/authSlice';
 import Input from '../components/common/Input';
