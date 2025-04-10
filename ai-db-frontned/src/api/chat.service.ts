@@ -4,7 +4,8 @@ import { addMessage, updateQueryStatus } from '../store/slices/chatSlice';
 import { addProgressUpdate } from '../store/slices/querySlice';
 import { store } from '../store';
 import { getToken } from '../utils/authService';
-import { QueryStatus, QueryResponse, ProgressUpdateType } from '../types/query.types';
+import { QueryStatus, ProgressUpdateType } from '../types/query.types';
+import { addToast } from '../store/slices/uiSlice';
 
 export interface WebSocketMessage {
   type: string;
@@ -20,7 +21,6 @@ export class ChatService {
   private reconnectTimeout: NodeJS.Timeout | null = null;
   private messageQueue: Array<{type: string, data: any}> = [];
   private isConnecting = false;
-  private isAuthenticated = false;
   private listeners: Map<string, Array<(data: any) => void>> = new Map();
 
   constructor(private url: string) {}
@@ -58,7 +58,6 @@ export class ChatService {
           console.log('WebSocket connected');
           this.reconnectAttempts = 0;
           this.isConnecting = false;
-          this.isAuthenticated = true;
           
           // Send any queued messages
           while (this.messageQueue.length > 0) {
@@ -76,7 +75,6 @@ export class ChatService {
           console.log('WebSocket disconnected');
           this.socket = null;
           this.isConnecting = false;
-          this.isAuthenticated = false;
           this.attemptReconnect();
           
           // Notify listeners
@@ -92,7 +90,6 @@ export class ChatService {
         this.socket.onerror = (error) => {
           console.error('WebSocket error:', error);
           this.isConnecting = false;
-          this.isAuthenticated = false;
           
           // Notify listeners
           this.notifyListeners('error', { error });
@@ -106,7 +103,6 @@ export class ChatService {
       } catch (error) {
         console.error('Failed to connect to WebSocket:', error);
         this.isConnecting = false;
-        this.isAuthenticated = false;
         resolve(false);
       }
     });
@@ -165,7 +161,6 @@ export class ChatService {
     }
     
     this.messageQueue = [];
-    this.isAuthenticated = false;
     
     // Notify listeners
     this.notifyListeners('disconnected', { connected: false });
@@ -287,6 +282,13 @@ export class ChatService {
   private attemptReconnect(): void {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       console.log('Maximum reconnection attempts reached');
+      
+      // Notify user about connection failure
+      store.dispatch(addToast({
+        type: 'error',
+        message: 'Unable to connect to server. Please refresh the page.'
+      }));
+      
       return;
     }
 
@@ -294,6 +296,14 @@ export class ChatService {
     this.reconnectAttempts++;
 
     console.log(`Attempting to reconnect in ${delay}ms (Attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+
+    // Notify user about reconnection attempt
+    if (this.reconnectAttempts > 1) {
+      store.dispatch(addToast({
+        type: 'info',
+        message: `Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`
+      }));
+    }
 
     this.reconnectTimeout = setTimeout(() => {
       this.connect();

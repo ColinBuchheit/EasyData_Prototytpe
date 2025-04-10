@@ -8,9 +8,7 @@ import {
   setSelectedConnection 
 } from '../store/slices/databaseSlice';
 import {
-  createChatSession,
   setCurrentSession,
-  addMessage,
   clearMessages,
   deleteSession
 } from '../store/slices/chatSlice';
@@ -32,7 +30,7 @@ const ChatPage: React.FC = () => {
   const location = useLocation();
   const { connections, selectedConnection } = useAppSelector(state => state.database);
   const { sessions, currentSessionId, status } = useAppSelector(state => state.chat);
-  const { initializeWebSocket, startNewSession, switchSession, sendMessage } = useChat();
+  const { initializeWebSocket, startNewSession } = useChat();
   
   // Local state
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
@@ -42,6 +40,7 @@ const ChatPage: React.FC = () => {
   // Close DB selector when clicking outside
   useClickOutside(dbSelectorRef, () => setDbSelectorOpen(false));
   
+  // Get session ID from URL if
   // Get session ID from URL if present
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -54,8 +53,18 @@ const ChatPage: React.FC = () => {
   
   // Initialize WebSocket connection
   useEffect(() => {
-    initializeWebSocket();
-  }, [initializeWebSocket]);
+    const initConnection = async () => {
+      const connected = await initializeWebSocket();
+      if (!connected) {
+        dispatch(addToast({
+          type: 'error',
+          message: 'Failed to connect to chat service'
+        }));
+      }
+    };
+    
+    initConnection();
+  }, [initializeWebSocket, dispatch]);
   
   // Fetch connections and query history on mount
   useEffect(() => {

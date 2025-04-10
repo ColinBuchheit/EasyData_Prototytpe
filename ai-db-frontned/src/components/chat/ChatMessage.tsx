@@ -66,7 +66,6 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message, isFirst, isLast }) =
   
   // Determine message type for styling
   const isUser = message.role === 'user';
-  const isAssistant = message.role === 'assistant';
   const isSystem = message.role === 'system';
   const isStreaming = message.isStreaming;
   
@@ -101,7 +100,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message, isFirst, isLast }) =
       animate={{ opacity: 1, y: 0 }}
       className={cn(
         "mb-8 group",
-        isSystem && "opacity-75"
+        isSystem && "opacity-75",
+        isFirst && "pt-4" // Add padding to the first message
       )}
     >
       {/* Message header with avatar and role */}
@@ -167,7 +167,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message, isFirst, isLast }) =
         <ReactMarkdown
           components={{
             // Custom rendering for code blocks
-            code({ node, className, children }) {
+            code({ className, children }) {
               const match = /language-(\w+)/.exec(className || '');
               const language = match ? match[1] : 'text';
               const isInline = !className;
@@ -214,9 +214,9 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message, isFirst, isLast }) =
         {/* Streaming indicator at the end of message */}
         {isStreaming && (
           <div className="mt-2 flex gap-1">
-            <div className="w-2 h-2 rounded-full bg-blue-500 animate-ping"></div>
-            <div className="w-2 h-2 rounded-full bg-blue-500 animate-ping" style={{ animationDelay: '0.2s' }}></div>
-            <div className="w-2 h-2 rounded-full bg-blue-500 animate-ping" style={{ animationDelay: '0.4s' }}></div>
+            <span className="animate-pulse text-blue-400">•</span>
+            <span className="animate-pulse text-blue-400" style={{ animationDelay: '0.2s' }}>•</span>
+            <span className="animate-pulse text-blue-400" style={{ animationDelay: '0.4s' }}>•</span>
           </div>
         )}
       </div>

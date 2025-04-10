@@ -10,6 +10,7 @@ import {
 } from '../store/slices/chatSlice';
 import { chatService } from '../api/chat.service';
 import { Message } from '../types/chat.types';
+import { addToast } from '../store/slices/uiSlice';
 
 export const useChat = () => {
   const dispatch = useAppDispatch();
@@ -47,6 +48,10 @@ export const useChat = () => {
       return result;
     } catch (error) {
       console.error("Failed to create chat session:", error);
+      dispatch(addToast({
+        type: 'error',
+        message: 'Failed to create new chat session'
+      }));
       return null;
     }
   }, [dispatch]);
@@ -56,20 +61,37 @@ export const useChat = () => {
   }, [dispatch]);
 
   const sendMessage = useCallback((content: string) => {
-    // Add user message to chat (now done in chatService)
     const dbId = selectedConnection?.id;
     
     // Connect if not already connected
     if (!isConnected) {
       initializeWebSocket().then(connected => {
         if (connected) {
-          chatService.sendQuery(content, dbId);
+          const success = chatService.sendQuery(content, dbId);
+          if (!success) {
+            // Handle message queue scenario
+            dispatch(addToast({
+              type: 'info',
+              message: 'Your message will be sent when connection is established'
+            }));
+          }
+        } else {
+          dispatch(addToast({
+            type: 'error',
+            message: 'Unable to connect to chat service'
+          }));
         }
       });
     } else {
-      chatService.sendQuery(content, dbId);
+      const success = chatService.sendQuery(content, dbId);
+      if (!success) {
+        dispatch(addToast({
+          type: 'error',
+          message: 'Failed to send message'
+        }));
+      }
     }
-  }, [isConnected, initializeWebSocket, selectedConnection?.id]);
+  }, [isConnected, initializeWebSocket, selectedConnection?.id, dispatch]);
 
   const removeSession = useCallback((sessionId: string) => {
     dispatch(deleteSession(sessionId));

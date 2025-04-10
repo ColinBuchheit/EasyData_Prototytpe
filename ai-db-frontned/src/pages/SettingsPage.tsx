@@ -1,18 +1,16 @@
 // src/pages/SettingsPage.tsx
 import React, { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/common/Tabs';
+import { Tabs, TabsList, TabsTrigger } from '../components/common/Tabs';
 import ProfileSettings from '../components/settings/ProfileSettings';
 import PreferencesSettings from '../components/settings/PreferencesSettings';
 import SecuritySettings from '../components/settings/SecuritySettings';
 import DatabaseSettings from '../components/settings/DatabaseSettings';
 import NotificationSettings from '../components/settings/NotificationSettings';
-import { useAppSelector } from '../hooks/useRedux';
 import { User, Shield, Bell, Database, Sliders } from 'lucide-react';
 
 const SettingsPage: React.FC = () => {
   const location = useLocation();
-  const { user } = useAppSelector(state => state.auth);
   
   // Get tab from URL path, default to profile
   const getTabFromUrl = (): string => {
@@ -43,7 +41,7 @@ const SettingsPage: React.FC = () => {
         {/* Settings header */}
         <header className="mb-8">
           <h1 className="text-3xl font-bold text-zinc-100">Settings</h1>
-          <p className="text-zinc-400 mt-2">a
+          <p className="text-zinc-400 mt-2">
             Manage your account settings and preferences
           </p>
         </header>

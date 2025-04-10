@@ -6,7 +6,7 @@ import {
   Message,
   ChatSession,
 } from '../../types/chat.types';
-import { QueryStatus, QueryResponse } from '../../types/query.types';
+import { QueryStatus } from '../../types/query.types';
 
 const initialState: ChatState = {
   sessions: [],
@@ -28,6 +28,10 @@ export const createChatSession = createAsyncThunk(
       updatedAt: new Date().toISOString(),
       messages: [],
     };
+    
+    // Example of using getState to access current state
+    const state = getState() as any;
+    console.log(`Creating new chat session. Current session count: ${state.chat.sessions.length}`);
     
     return session;
   }
