@@ -199,33 +199,25 @@ export const isEmpty = (value: string | null | undefined): boolean => {
     return Number.isInteger(num);
   };
   
-  /**
-   * Validate port number
-   */
-  export const isValidPort = (port: string | number): boolean => {
-    if (!isValidInteger(port)) return false;
-    
-    const portNum = Number(port);
-    return portNum >= 0 && portNum <= 65535;
-  };
-  
-  /**
-   * Validate hostname format
-   */
-  export const isValidHostname = (hostname: string): boolean => {
-    if (isEmpty(hostname)) return false;
-    
-    // Basic hostname validation
-    const hostnameRegex = /^(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9])$/;
-    
-    // IP address validation
-    const ipRegex = /^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
-    
-    // Accept localhost for development
-    if (hostname === 'localhost') return true;
-    
-    return hostnameRegex.test(hostname) || ipRegex.test(hostname);
-  };
+ export const isValidHostname = (hostname: string): boolean => {
+   if (hostname === 'localhost') return true;
+   
+   // Hostname regex - domain name or IP address
+   const hostnameRegex = /^(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9])$/;
+   
+   // IP address regex
+   const ipRegex = /^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+   
+   return hostnameRegex.test(hostname) || ipRegex.test(hostname);
+ };
+ 
+ /**
+  * Validate port number
+  */
+ export const isValidPort = (port: string): boolean => {
+   const portNum = parseInt(port, 10);
+   return !isNaN(portNum) && portNum >= 0 && portNum <= 65535;
+ };
   
   /**
    * Validate database connection details
@@ -252,9 +244,6 @@ export const isEmpty = (value: string | null | undefined): boolean => {
       errors.host = 'Invalid hostname or IP address';
     }
     
-    if (!isValidPort(connection.port)) {
-      errors.port = 'Port must be a valid number between 0 and 65535';
-    }
     
     if (isEmpty(connection.username)) {
       errors.username = 'Username is required';

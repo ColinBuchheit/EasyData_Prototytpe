@@ -1,15 +1,10 @@
-import React from 'react';
-// Removed MainLayout import
-import UserProfile from '../components/settings/UserProfile';
-import Preferences from '../components/settings/Preferences';
+// src/pages/ProfilePage.tsx
+import React, { useEffect } from 'react';
+import { Navigate } from 'react-router-dom';
 
 const ProfilePage: React.FC = () => {
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-10 max-w-5xl">
-      <UserProfile />
-      <Preferences />
-    </div>
-  );
+  // Redirect to settings page with profile tab selected
+  return <Navigate to="/settings/profile" replace />;
 };
 
 export default ProfilePage;

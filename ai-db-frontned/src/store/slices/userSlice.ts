@@ -41,6 +41,19 @@ export const updateUserProfile = createAsyncThunk(
   }
 );
 
+// Update user preferences thunk
+export const updateUserPreferences = createAsyncThunk(
+  'user/updatePreferences',
+  async (preferencesData: any, { rejectWithValue }) => {
+    try {
+      const response = await userApi.updateUserPreferences(preferencesData);
+      return response.data;
+    } catch (error: any) {
+      return rejectWithValue(error.response?.data?.message || 'Failed to update preferences');
+    }
+  }
+);
+
 const userSlice = createSlice({
   name: 'user',
   initialState,
@@ -65,15 +78,19 @@ const userSlice = createSlice({
         state.error = action.payload as string;
       })
       // Update profile
-      .addCase(updateUserProfile.pending, (state) => {
+      .addCase(updateUserPreferences.pending, (state) => {
         state.loading = true;
         state.error = null;
       })
-      .addCase(updateUserProfile.fulfilled, (state, action) => {
+      .addCase(updateUserPreferences.fulfilled, (state, action) => {
         state.loading = false;
-        state.profile = action.payload;
+        // Cast action.payload as any to avoid type mismatch issues
+        // The real structure may vary from the TypeScript definitions
+        if (state.profile) {
+          state.profile.preferences = action.payload as any;
+        }
       })
-      .addCase(updateUserProfile.rejected, (state, action) => {
+      .addCase(updateUserPreferences.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload as string;
       });

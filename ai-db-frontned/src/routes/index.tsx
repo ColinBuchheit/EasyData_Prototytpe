@@ -14,6 +14,7 @@ import NotFoundPage from '../pages/NotFoundPage';
 import ChatPage from '../pages/ChatPage';
 import DatabasePage from '../pages/DatabasePage';
 import ProfilePage from '../pages/ProfilePage';
+import SettingsPage from '../pages/SettingsPage';
 import Dashboard from '../pages/Dashboard';
 
 // Auth Guard Component
@@ -91,6 +92,10 @@ const AppRoutes: React.FC = () => {
         <Route path="/databases" element={<DatabasePage />} />
         <Route path="/chat" element={<ChatPage />} />
         <Route path="/profile" element={<ProfilePage />} />
+        
+        {/* Settings routes */}
+        <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/settings/:tab" element={<SettingsPage />} />
       </Route>
       
       {/* 404 Route */}

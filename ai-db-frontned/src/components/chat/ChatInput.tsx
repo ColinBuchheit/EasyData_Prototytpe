@@ -1,26 +1,21 @@
 import React, { useState } from 'react';
 import { Send } from 'lucide-react';
-import { useAppDispatch } from '../../hooks/useRedux';
-import { addMessage } from '../../store/slices/chatSlice';
 import Button from '../common/Button';
 import Input from '../common/Input';
 
-const ChatInput: React.FC = () => {
+interface ChatInputProps {
+  onSendMessage: (content: string) => void;
+  disabled?: boolean;
+}
+
+const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, disabled = false }) => {
   const [input, setInput] = useState('');
-  const dispatch = useAppDispatch();
 
   const handleSend = () => {
     const trimmed = input.trim();
-    if (!trimmed) return;
+    if (!trimmed || disabled) return;
 
-    const newMessage = {
-      id: crypto.randomUUID(),
-      role: 'user' as const,
-      content: trimmed,
-      timestamp: new Date().toISOString(),
-    };
-
-    dispatch(addMessage(newMessage));
+    onSendMessage(trimmed);
     setInput('');
   };
 
@@ -40,7 +35,7 @@ const ChatInput: React.FC = () => {
       <Button
         onClick={handleSend}
         aria-label="Send message"
-        disabled={!input.trim()}
+        disabled={!input.trim() || disabled}
         className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50"
       >
         <Send className="w-4 h-4" />

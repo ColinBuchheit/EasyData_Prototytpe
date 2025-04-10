@@ -41,6 +41,7 @@ const Sidebar: React.FC = () => {
   const navItems: NavItem[] = [
     { title: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
     { title: 'Databases', path: '/databases', icon: Database },
+    { title: 'Chat', path: '/chat', icon: MessageSquare },
     { title: 'Analytics', path: '/analytics', icon: BarChart2 },
     { title: 'Settings', path: '/settings', icon: Settings },
   ];

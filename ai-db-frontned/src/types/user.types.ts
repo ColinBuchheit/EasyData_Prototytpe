@@ -1,5 +1,6 @@
 // src/types/user.types.ts
 export interface UserProfile {
+    preferences: UserProfile | null;
     userId: number;
     firstName?: string;
     lastName?: string;
