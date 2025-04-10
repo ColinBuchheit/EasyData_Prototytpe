@@ -6,7 +6,7 @@ import { useAppDispatch, useAppSelector } from '../hooks/useRedux';
 import { fetchUserConnections } from '../store/slices/databaseSlice';
 import { fetchQueryHistory } from '../store/slices/querySlice';
 import { createChatSession } from '../store/slices/chatSlice';
-import MainLayout from '../components/layout/MainLayout';
+// Removed MainLayout import
 
 // Components
 import Spinner from '../components/common/Spinner';
@@ -58,18 +58,17 @@ const Dashboard: React.FC = () => {
   // Loading state
   if (isInitialLoad) {
     return (
-      <MainLayout>
-        <div className="min-h-[80vh] flex flex-col items-center justify-center">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
-          >
-            <Spinner size="xl" />
-            <p className="mt-4 text-zinc-400 text-center">Loading your dashboard...</p>
-          </motion.div>
-        </div>
-      </MainLayout>
+      // Removed MainLayout wrapper
+      <div className="min-h-[80vh] flex flex-col items-center justify-center">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+        >
+          <Spinner size="xl" />
+          <p className="mt-4 text-zinc-400 text-center">Loading your dashboard...</p>
+        </motion.div>
+      </div>
     );
   }
 
