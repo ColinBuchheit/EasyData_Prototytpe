@@ -34,7 +34,6 @@ const ChatPage: React.FC = () => {
   const { connections, selectedConnection } = useAppSelector(state => state.database);
   const { sessions, currentSessionId } = useAppSelector(state => state.chat);
   const { sidebarOpen } = useAppSelector(state => state.ui);
-  const { status: wsStatus, connect } = useWebSocket();
   const { initializeWebSocket, startNewSession, switchSession, sendMessage } = useChat();
   
   // Local state
@@ -126,12 +125,14 @@ const ChatPage: React.FC = () => {
             setIsMobileSidebarOpen(false);
           }}
           onDeleteSession={(id: string | null) => {
-            dispatch(deleteSession(id));
-            if (id === currentSessionId && sessions.length > 1) {
-              const nextSession = sessions.find(s => s.id !== id);
-              if (nextSession) {
-                dispatch(setCurrentSession(nextSession.id));
-                navigate(`/chat?session=${nextSession.id}`);
+            if (id) {
+              dispatch(deleteSession(id));
+              if (id === currentSessionId && sessions.length > 1) {
+                const nextSession = sessions.find(s => s.id !== id);
+                if (nextSession) {
+                  dispatch(setCurrentSession(nextSession.id));
+                  navigate(`/chat?session=${nextSession.id}`);
+                }
               }
             }
           }}

@@ -1,7 +1,6 @@
 // src/pages/SettingsPage.tsx
 import React, { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
-import MainLayout from '../components/layout/MainLayout';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/common/Tabs';
 import ProfileSettings from '../components/settings/ProfileSettings';
 import PreferencesSettings from '../components/settings/PreferencesSettings';
@@ -40,12 +39,11 @@ const SettingsPage: React.FC = () => {
   };
 
   return (
-    <MainLayout>
       <div className="container mx-auto py-8 px-4 max-w-6xl">
         {/* Settings header */}
         <header className="mb-8">
           <h1 className="text-3xl font-bold text-zinc-100">Settings</h1>
-          <p className="text-zinc-400 mt-2">
+          <p className="text-zinc-400 mt-2">a
             Manage your account settings and preferences
           </p>
         </header>
@@ -117,7 +115,6 @@ const SettingsPage: React.FC = () => {
           </div>
         </div>
       </div>
-    </MainLayout>
   );
 };
 
