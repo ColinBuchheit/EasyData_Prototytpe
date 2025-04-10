@@ -1,6 +1,6 @@
 // src/routes/index.tsx
 import React from 'react';
-import { Navigate, RouteObject, useLocation, useRoutes } from 'react-router-dom';
+import { Navigate, Outlet, RouteObject, useLocation, useRoutes } from 'react-router-dom';
 import { useAppSelector } from '../hooks/useRedux';
 
 // Layout Components
@@ -14,6 +14,7 @@ import NotFoundPage from '../pages/NotFoundPage';
 import ChatPage from '../pages/ChatPage';
 import DatabasePage from '../pages/DatabasePage';
 import ProfilePage from '../pages/ProfilePage';
+import Dashboard from '../pages/Dashboard'; // Import our new Dashboard component
 
 // Auth Guard Component
 const AuthGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -22,7 +23,7 @@ const AuthGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   
   // Show loading indicator while checking auth status
   if (loading) {
-    return <div className="min-h-screen flex items-center justify-center bg-background">
+    return <div className="min-h-screen flex items-center justify-center bg-zinc-950">
       <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
     </div>;
   }
@@ -48,7 +49,7 @@ const PublicGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 };
 
 // App Routes Configuration
-export const AppRoutes: React.FC = () => {
+const AppRoutes: React.FC = () => {
   const routes: RouteObject[] = [
     // Public Routes
     {
@@ -89,7 +90,9 @@ export const AppRoutes: React.FC = () => {
       path: '/',
       element: (
         <AuthGuard>
-          <MainLayout children={undefined} />
+          <MainLayout>
+            <Outlet />
+          </MainLayout>
         </AuthGuard>
       ),
       children: [
@@ -99,7 +102,7 @@ export const AppRoutes: React.FC = () => {
         },
         {
           path: '/dashboard',
-          element: <ChatPage />,
+          element: <Dashboard />,
         },
         {
           path: '/databases',

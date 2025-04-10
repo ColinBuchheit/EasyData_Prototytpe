@@ -9,6 +9,7 @@ import {
 } from '../../types/auth.types';
 import { setToken, clearTokens, getToken, getRefreshToken, setRefreshToken } from '../../utils/auth.utils';
 import { fetchUserProfile } from './userSlice';
+import { safeLogout } from '../../utils/auth-verification';
 
 const initialState: AuthState = {
   user: null,
@@ -59,8 +60,8 @@ export const logout = createAsyncThunk(
   'auth/logout',
   async (_, { rejectWithValue }) => {
     try {
-      await authApi.logout();
-      clearTokens();
+      // Use our improved safe logout
+      safeLogout();
       return { success: true };
     } catch (error: any) {
       // Even if API call fails, we should still clear local tokens
@@ -123,7 +124,7 @@ const authSlice = createSlice({
     });
     builder.addCase(login.rejected, (state, action) => {
       state.loading = false;
-      state.error = action.payload as string || 'Login failed';
+      state.error = action.error.message || 'Login failed';
     });
 
     // Register
@@ -137,7 +138,7 @@ const authSlice = createSlice({
     });
     builder.addCase(register.rejected, (state, action) => {
       state.loading = false;
-      state.error = action.payload as string || 'Registration failed';
+      state.error = action.error.message || 'Registration failed';
     });
 
     // Logout
@@ -145,18 +146,22 @@ const authSlice = createSlice({
       state.loading = true;
     });
     builder.addCase(logout.fulfilled, (state) => {
+      // Reset all state
       state.loading = false;
       state.user = null;
       state.token = null;
       state.refreshToken = null;
       state.isAuthenticated = false;
+      state.error = null;
     });
     builder.addCase(logout.rejected, (state) => {
+      // Reset all state regardless of API error
       state.loading = false;
       state.user = null;
       state.token = null;
       state.refreshToken = null;
       state.isAuthenticated = false;
+      state.error = null;
     });
   },
 });
