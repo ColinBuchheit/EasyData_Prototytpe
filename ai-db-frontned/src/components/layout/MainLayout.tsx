@@ -1,30 +1,35 @@
 // src/components/layout/MainLayout.tsx
 import React, { ReactNode } from 'react';
-import Sidebar from './Sidebar';
+import { Outlet } from 'react-router-dom';
 import Header from './Header';
+import Sidebar from './Sidebar';
 import Footer from './Footer';
-import { useAuth } from '../../hooks/useAuth';
 
 interface MainLayoutProps {
-  children: ReactNode;
+  children?: ReactNode;
 }
 
+/**
+ * Main layout component that wraps the entire authenticated application
+ * Contains the sidebar, header, main content area, and footer
+ * Uses Outlet from react-router-dom to render nested routes
+ * Now also accepts children props for direct content rendering
+ */
 const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
-  const { } = useAuth();
-
   return (
     <div className="flex h-screen bg-zinc-950 overflow-hidden">
-      {/* Sidebar */}
+      {/* Sidebar - fixed position */}
       <Sidebar />
       
-      {/* Main Content */}
+      {/* Main content area */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Header */}
+        {/* Header - sticky top */}
         <Header />
         
-        {/* Main Content Area with Scrolling */}
-        <main className="flex-1 overflow-auto p-0">
-          {children}
+        {/* Main content with scrolling */}
+        <main className="flex-1 overflow-auto p-6">
+          {/* Render children if provided, otherwise render Outlet */}
+          {children || <Outlet />}
         </main>
         
         {/* Footer */}

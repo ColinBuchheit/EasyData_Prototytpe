@@ -1,12 +1,12 @@
 // src/routes/index.tsx
 import React from 'react';
-import { Navigate, Outlet, RouteObject, useLocation, useRoutes } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAppSelector } from '../hooks/useRedux';
 
-// Layout Components
+// Import the layout wrapper component
 import MainLayout from '../components/layout/MainLayout';
 
-// Page Components
+// Import page components
 import LoginPage from '../pages/LoginPage';
 import RegisterPage from '../pages/RegisterPage';
 import PasswordResetPage from '../pages/PasswordResetPage';
@@ -14,7 +14,7 @@ import NotFoundPage from '../pages/NotFoundPage';
 import ChatPage from '../pages/ChatPage';
 import DatabasePage from '../pages/DatabasePage';
 import ProfilePage from '../pages/ProfilePage';
-import Dashboard from '../pages/Dashboard'; // Import our new Dashboard component
+import Dashboard from '../pages/Dashboard';
 
 // Auth Guard Component
 const AuthGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -48,87 +48,55 @@ const PublicGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   return <>{children}</>;
 };
 
-// App Routes Configuration
+// Main Routes Component
 const AppRoutes: React.FC = () => {
-  const routes: RouteObject[] = [
-    // Public Routes
-    {
-      path: '/login',
-      element: (
+  return (
+    <Routes>
+      {/* Public Routes - No Layout */}
+      <Route path="/login" element={
         <PublicGuard>
           <LoginPage />
         </PublicGuard>
-      ),
-    },
-    {
-      path: '/register',
-      element: (
+      } />
+      
+      <Route path="/register" element={
         <PublicGuard>
           <RegisterPage />
         </PublicGuard>
-      ),
-    },
-    {
-      path: '/reset-password',
-      element: (
+      } />
+      
+      <Route path="/reset-password" element={
         <PublicGuard>
           <PasswordResetPage />
         </PublicGuard>
-      ),
-    },
-    {
-      path: '/forgot-password',
-      element: (
+      } />
+      
+      <Route path="/forgot-password" element={
         <PublicGuard>
           <PasswordResetPage isForgotPassword />
         </PublicGuard>
-      ),
-    },
-    
-    // Protected Routes with MainLayout
-    {
-      path: '/',
-      element: (
+      } />
+      
+      {/* Protected Routes - Wrapped in MainLayout */}
+      <Route element={
         <AuthGuard>
-          <MainLayout>
-            <Outlet />
-          </MainLayout>
+          <MainLayout />
         </AuthGuard>
-      ),
-      children: [
-        {
-          path: '/',
-          element: <Navigate to="/dashboard" replace />,
-        },
-        {
-          path: '/dashboard',
-          element: <Dashboard />,
-        },
-        {
-          path: '/databases',
-          element: <DatabasePage />,
-        },
-        {
-          path: '/chat',
-          element: <ChatPage />,
-        },
-        {
-          path: '/profile',
-          element: <ProfilePage />,
-        },
-      ],
-    },
-    
-    // 404 Not Found Route
-    {
-      path: '*',
-      element: <NotFoundPage />,
-    },
-  ];
-
-  const routing = useRoutes(routes);
-  
-  return <>{routing}</>;
+      }>
+        {/* Default redirect */}
+        <Route index element={<Navigate to="/dashboard" replace />} />
+        
+        {/* Main app routes */}
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/databases" element={<DatabasePage />} />
+        <Route path="/chat" element={<ChatPage />} />
+        <Route path="/profile" element={<ProfilePage />} />
+      </Route>
+      
+      {/* 404 Route */}
+      <Route path="*" element={<NotFoundPage />} />
+    </Routes>
+  );
 };
 
 export default AppRoutes;

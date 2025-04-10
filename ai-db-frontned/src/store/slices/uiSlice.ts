@@ -17,9 +17,22 @@ interface UIState {
   }>;
 }
 
+// Check if window is defined and get initial sidebar preference
+const getInitialSidebarState = (): boolean => {
+  if (typeof window !== 'undefined') {
+    const savedState = localStorage.getItem('sidebarOpen');
+    // Default to open if not saved, but close on small screens
+    if (savedState !== null) {
+      return savedState === 'true';
+    }
+    return window.innerWidth > 768;
+  }
+  return true; // Default for SSR
+};
+
 const initialState: UIState = {
   theme: 'system', // Default to system theme
-  sidebarOpen: true,
+  sidebarOpen: getInitialSidebarState(),
   rightPanelOpen: false,
   rightPanelContent: null,
   modalOpen: false,
@@ -37,9 +50,17 @@ const uiSlice = createSlice({
     },
     toggleSidebar: (state) => {
       state.sidebarOpen = !state.sidebarOpen;
+      // Save to localStorage for persistence
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('sidebarOpen', state.sidebarOpen.toString());
+      }
     },
     setSidebarOpen: (state, action: PayloadAction<boolean>) => {
       state.sidebarOpen = action.payload;
+      // Save to localStorage for persistence
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('sidebarOpen', action.payload.toString());
+      }
     },
     toggleRightPanel: (state, action: PayloadAction<'schema' | 'connections' | 'history' | null>) => {
       if (state.rightPanelContent === action.payload && state.rightPanelOpen) {
@@ -61,7 +82,6 @@ const uiSlice = createSlice({
       state.modalContent = null;
     },
     addToast: (state, action: PayloadAction<{
-      [x: string]: any;
       type: 'success' | 'error' | 'info' | 'warning';
       message: string;
       duration?: number;
@@ -71,6 +91,7 @@ const uiSlice = createSlice({
         id,
         ...action.payload,
       });
+      return { ...state, id };
     },
     removeToast: (state, action: PayloadAction<string>) => {
       state.toasts = state.toasts.filter(toast => toast.id !== action.payload);
