@@ -5,7 +5,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useAppDispatch, useAppSelector } from '../hooks/useRedux';
 import { 
   fetchUserConnections, 
-  setSelectedConnection 
+  setSelectedConnection,
+  checkConnectionHealth,
+  activateConnection
 } from '../store/slices/databaseSlice';
 import {
   setCurrentSession,
@@ -18,7 +20,7 @@ import ChatSidebar from '../components/chat/ChatSidebar';
 import ChatProgress from '../components/chat/ChatProgress';
 import { addToast } from '../store/slices/uiSlice';
 import useChat from '../hooks/useChat';
-import { Database, Menu, Plus, Settings, X } from 'lucide-react';
+import { Database, Menu, Plus, Settings, X, AlertTriangle } from 'lucide-react';
 import { cn } from '../utils/format.utils';
 import Button from '../components/common/Button';
 import DatabaseSelector from '../components/database/DatabaseSelector';
@@ -40,7 +42,6 @@ const ChatPage: React.FC = () => {
   // Close DB selector when clicking outside
   useClickOutside(dbSelectorRef, () => setDbSelectorOpen(false));
   
-  // Get session ID from URL if
   // Get session ID from URL if present
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -50,6 +51,13 @@ const ChatPage: React.FC = () => {
       dispatch(setCurrentSession(sessionId));
     }
   }, [location.search, sessions, currentSessionId, dispatch]);
+  
+  // Check connection health when component mounts or when the selected connection changes
+  useEffect(() => {
+    if (selectedConnection) {
+      dispatch(checkConnectionHealth(selectedConnection.id));
+    }
+  }, [selectedConnection, dispatch]);
   
   // Initialize WebSocket connection
   useEffect(() => {
@@ -88,16 +96,30 @@ const ChatPage: React.FC = () => {
     }
   };
   
-  // Handle connection selection
-  const handleSelectConnection = (id: number) => {
-    const connection = connections.find(c => c.id === id);
-    if (connection) {
+  // Handle connection selection with improved activation flow
+  const handleSelectConnection = async (id: number) => {
+    try {
+      const connection = connections.find(c => c.id === id);
+      if (!connection) {
+        throw new Error('Connection not found');
+      }
+      
+      // Check and activate the connection
+      await dispatch(checkConnectionHealth(id)).unwrap();
+      await dispatch(activateConnection(id)).unwrap();
+      
+      // Set as selected connection
       dispatch(setSelectedConnection(connection));
       setDbSelectorOpen(false);
       
       dispatch(addToast({
         type: 'success',
         message: `Connected to ${connection.connection_name || connection.database_name}`
+      }));
+    } catch (error: any) {
+      dispatch(addToast({
+        type: 'error',
+        message: `Failed to connect to database: ${error.message || 'Connection failed'}`
       }));
     }
   };
@@ -197,16 +219,18 @@ const ChatPage: React.FC = () => {
           </div>
           
           <div className="flex items-center gap-2">
-            {/* Database selector */}
+            {/* Database selector with improved UI */}
             <div className="relative" ref={dbSelectorRef}>
               <Button
-                variant="ghost"
+                variant={selectedConnection?.is_connected ? "default" : "outline"}
                 size="sm"
                 leftIcon={<Database className="w-4 h-4" />}
-                rightIcon={<span className={cn(
-                  "w-2 h-2 rounded-full",
-                  selectedConnection?.is_connected ? "bg-green-500" : "bg-red-500"
-                )}></span>}
+                rightIcon={
+                  <div className={cn(
+                    "w-2 h-2 rounded-full",
+                    selectedConnection?.is_connected ? "bg-green-500" : "bg-red-500"
+                  )}></div>
+                }
                 onClick={() => setDbSelectorOpen(!dbSelectorOpen)}
               >
                 {selectedConnection ? (
@@ -233,11 +257,29 @@ const ChatPage: React.FC = () => {
                         </div>
                       </div>
                     ) : (
-                      <DatabaseSelector
-                        connections={connections}
-                        selectedId={selectedConnection?.id}
-                        onSelect={handleSelectConnection}
-                      />
+                      <div className="space-y-1">
+                        {connections.map((conn) => (
+                          <div 
+                            key={conn.id}
+                            onClick={() => handleSelectConnection(conn.id)}
+                            className={cn(
+                              "flex items-center justify-between px-3 py-2 rounded-md cursor-pointer",
+                              conn.id === selectedConnection?.id 
+                                ? "bg-blue-600/20 text-blue-400" 
+                                : "text-zinc-300 hover:bg-zinc-800"
+                            )}
+                          >
+                            <div className="flex items-center gap-2">
+                              <Database className="w-4 h-4" />
+                              <span>{conn.connection_name || conn.database_name}</span>
+                            </div>
+                            <div className={cn(
+                              "w-2 h-2 rounded-full",
+                              conn.is_connected ? "bg-green-500" : "bg-red-500"
+                            )}></div>
+                          </div>
+                        ))}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -255,6 +297,28 @@ const ChatPage: React.FC = () => {
             </Button>
           </div>
         </div>
+        
+        {/* Display connection status message when needed */}
+        {selectedConnection && !selectedConnection.is_connected && (
+          <div className="bg-amber-900/20 border border-amber-800/30 rounded-lg p-4 m-4 text-amber-200 flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-medium">Database connection inactive</p>
+              <p className="text-sm mt-1">
+                The selected database connection is not active. Please try reconnecting 
+                or select another database.
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-2 border-amber-500/30 text-amber-300 hover:bg-amber-800/20"
+                onClick={() => dispatch(checkConnectionHealth(selectedConnection.id))}
+              >
+                Retry Connection
+              </Button>
+            </div>
+          </div>
+        )}
         
         {/* Chat container */}
         <ChatContainer />
