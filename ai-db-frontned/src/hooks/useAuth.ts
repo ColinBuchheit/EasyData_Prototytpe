@@ -11,37 +11,29 @@ export const useAuth = () => {
   const dispatch = useAppDispatch();
   const { user, isAuthenticated, loading, error } = useAppSelector(state => state.auth);
 
-  // Check for token on mount
-  // In src/hooks/useAuth.ts
-// Check for token on mount
-  // In src/hooks/useAuth.ts
-useEffect(() => {
-  const token = getToken();
-  if (token && !isAuthenticated) {
-    // Add proper error handling
-    const fetchUserData = async () => {
-      try {
-        console.log("[AUTH DEBUG] Recovering user session from token");
-        // Fetch the current user's data
-        const userResponse = await authApi.getCurrentUser();
-        
-        if (userResponse.success && userResponse.user) {
-          dispatch(setUser(userResponse.user));
-          console.log("[AUTH DEBUG] User session recovered successfully");
-        } else {
-          console.log("[AUTH DEBUG] Token exists but couldn't recover user session");
-          // Clear tokens if we can't recover the session
+  useEffect(() => {
+    const token = getToken();
+    if (token && !isAuthenticated) {
+      // Use async IIFE to properly handle the Promise
+      (async () => {
+        try {
+          console.log("[AUTH DEBUG] Recovering user session from token");
+          const userResponse = await authApi.getCurrentUser();
+          
+          if (userResponse.success && userResponse.user) {
+            dispatch(setUser(userResponse.user));
+            console.log("[AUTH DEBUG] User session recovered successfully");
+          } else {
+            console.log("[AUTH DEBUG] Token exists but couldn't recover user session");
+            clearTokens();
+          }
+        } catch (error) {
+          console.error("[AUTH DEBUG] Error recovering user session:", error);
           clearTokens();
         }
-      } catch (error) {
-        console.error("[AUTH DEBUG] Error recovering user session:", error);
-        clearTokens();
-      }
-    };
-    
-    fetchUserData();
-  }
-}, [dispatch, isAuthenticated]);
+      })();
+    }
+  }, [dispatch, isAuthenticated]);
 
   const handleLogin = async (credentials: LoginRequest) => {
     try {

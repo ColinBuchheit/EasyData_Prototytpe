@@ -50,6 +50,24 @@ export class ChatService {
     this.isConnecting = true;
     console.log('Attempting to connect to WebSocket');
 
+    // Get current auth state
+    const state = store.getState();
+    const { user, isAuthenticated } = state.auth;
+    
+    // Verify user is authenticated with a valid ID
+    if (!isAuthenticated || !user || !user.id) {
+      console.error('User not authenticated or missing ID');
+      this.isConnecting = false;
+      
+      // Show a toast to the user
+      store.dispatch(addToast({
+        type: 'error',
+        message: 'Authentication error. Please log in again.'
+      }));
+      
+      return false;
+    }
+
     return new Promise((resolve) => {
       const token = getToken();
       if (!token) {
@@ -60,8 +78,8 @@ export class ChatService {
       }
 
       try {
-        // Include token in the connection URL
-        this.socket = new WebSocket(`${this.url}?token=${token}`);
+        // Include token AND userId in the connection URL for extra security
+        this.socket = new WebSocket(`${this.url}?token=${token}&userId=${user.id}`);
         console.log('WebSocket constructor called, waiting for connection');
 
         this.socket.onopen = () => {
@@ -144,10 +162,24 @@ export class ChatService {
     console.log('WebSocket state:', this.socket ? 
       ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'][this.socket.readyState] : 'null');
     
+    // Get current auth state to ensure userId is included
+    const state = store.getState();
+    const { user, isAuthenticated } = state.auth;
+    
+    // Return early if not authenticated
+    if (!isAuthenticated || !user || !user.id) {
+      console.error('User not authenticated or missing ID for WebSocket message');
+      store.dispatch(addToast({
+        type: 'error',
+        message: 'Authentication error. Please log in again.'
+      }));
+      return false;
+    }
+    
     // Check if socket is open
     if (this.socket?.readyState !== WebSocket.OPEN) {
       console.log('WebSocket not open, queueing message');
-      this.messageQueue.push({ type, data });
+      this.messageQueue.push({ type, data: { ...data, userId: user.id } });
       
       // Try to connect
       this.connect();
@@ -157,6 +189,9 @@ export class ChatService {
     try {
       // Format data properly ensuring numbers are numbers, not objects or strings
       if (data && typeof data === 'object') {
+        // Add userId to EVERY message
+        data.userId = user.id;
+        
         if (data.dbId !== undefined) {
           data.dbId = Number(data.dbId) || null;
         }
@@ -172,62 +207,85 @@ export class ChatService {
     }
   }
 
-  // Modified sendQuery function for chat.service.ts
-public sendQuery(task: string, dbId?: number): boolean {
-  // Ensure dbId is a proper number if provided
-  const parsedDbId = dbId !== undefined ? Number(dbId) : undefined;
-  
-  // Validate dbId is actually a number and not NaN
-  if (parsedDbId !== undefined && isNaN(parsedDbId)) {
-    console.error('Invalid database ID provided:', dbId);
-    store.dispatch(addToast({
-      type: 'error',
-      message: 'Invalid database ID format'
+  public async sendQuery(task: string, dbId?: number): Promise<boolean> {
+    // Get current auth state
+    const state = store.getState();
+    const { user, isAuthenticated } = state.auth;
+    
+    // Verify user is authenticated with a valid ID
+    if (!isAuthenticated || !user || !user.id) {
+      console.error('User not authenticated or missing ID');
+      store.dispatch(addToast({
+        type: 'error',
+        message: 'Authentication error. Please log in again.'
+      }));
+      return false;
+    }
+    
+    // Ensure dbId is a proper number if provided
+    const parsedDbId = dbId !== undefined ? Number(dbId) : undefined;
+    
+    // Validate dbId is actually a number and not NaN
+    if (parsedDbId !== undefined && isNaN(parsedDbId)) {
+      console.error('Invalid database ID provided:', dbId);
+      store.dispatch(addToast({
+        type: 'error',
+        message: 'Invalid database ID format'
+      }));
+      return false;
+    }
+    
+    // Update UI state to show processing
+    store.dispatch(updateQueryStatus({ 
+      status: QueryStatus.PROCESSING, 
+      message: 'Processing your query...' 
     }));
-    return false;
+    
+    // Clear any previous progress updates
+    store.dispatch(clearProgressUpdates());
+    
+    // Add user message to chat if needed
+    const lastMessage = state.chat.messages[state.chat.messages.length - 1];
+    if (!lastMessage || lastMessage.role !== 'user' || lastMessage.content !== task) {
+      store.dispatch(addMessage({
+        id: uuidv4(),
+        role: 'user',
+        content: task,
+        timestamp: new Date().toISOString()
+      }));
+    }
+    
+    // Prepare message payload - include userId explicitly
+    const messagePayload: any = { 
+      task, 
+      sessionId: state.chat.currentSessionId,
+      userId: user.id  // Explicitly include the userId
+    };
+    
+    // Add dbId to payload only if it's a valid number
+    if (parsedDbId !== undefined) {
+      messagePayload.dbId = parsedDbId;
+    }
+    
+    console.log('Sending query with payload:', messagePayload);
+    
+    // Ensure we're connected before sending
+    if (this.socket?.readyState !== WebSocket.OPEN) {
+      const connected = await this.connect();
+      if (!connected) {
+        store.dispatch(addToast({
+          type: 'error',
+          message: 'Failed to connect to chat service'
+        }));
+        return false;
+      }
+    }
+    
+    // Send the message with proper payload
+    return this.sendMessage('query', messagePayload);
   }
-  
-  // Update UI state to show processing
-  store.dispatch(updateQueryStatus({ 
-    status: QueryStatus.PROCESSING, 
-    message: 'Processing your query...' 
-  }));
-  
-  // Clear any previous progress updates
-  store.dispatch(clearProgressUpdates());
-  
-  // Get current state
-  const state = store.getState();
-  
-  // Add user message to chat if needed
-  const lastMessage = state.chat.messages[state.chat.messages.length - 1];
-  if (!lastMessage || lastMessage.role !== 'user' || lastMessage.content !== task) {
-    store.dispatch(addMessage({
-      id: uuidv4(),
-      role: 'user',
-      content: task,
-      timestamp: new Date().toISOString()
-    }));
-  }
-  
-  // Prepare message payload - only include dbId if it's valid
-  const messagePayload: any = { 
-    task, 
-    sessionId: state.chat.currentSessionId 
-  };
-  
-  // Add dbId to payload only if it's a valid number
-  if (parsedDbId !== undefined) {
-    messagePayload.dbId = parsedDbId;
-  }
-  
-  console.log('Sending query with payload:', messagePayload);
-  
-  // Send the message with proper payload
-  return this.sendMessage('query', messagePayload);
-}
 
-  public sendNaturalLanguageQuery(task: string, dbId?: number): boolean {
+  public async sendNaturalLanguageQuery(task: string, dbId?: number): Promise<boolean> {
     return this.sendQuery(task, dbId);
   }
 
@@ -259,8 +317,15 @@ public sendQuery(task: string, dbId?: number): boolean {
     // Send ping every 30 seconds to keep connection alive
     this.pingInterval = setInterval(() => {
       if (this.isConnected()) {
+        // Get current auth state for ping
+        const state = store.getState();
+        const { user } = state.auth;
+        
         console.log('Sending ping to keep connection alive');
-        this.sendMessage('ping', { timestamp: Date.now() });
+        this.sendMessage('ping', { 
+          timestamp: Date.now(),
+          userId: user?.id  // Include userId in pings too
+        });
       }
     }, 30000);
   }
@@ -476,7 +541,15 @@ public sendQuery(task: string, dbId?: number): boolean {
   // Debug method to test connection
   public testConnection(): boolean {
     console.log('Testing WebSocket connection');
-    return this.sendMessage('ping', { timestamp: Date.now() });
+    
+    // Get current auth state for test ping
+    const state = store.getState();
+    const { user } = state.auth;
+    
+    return this.sendMessage('ping', { 
+      timestamp: Date.now(),
+      userId: user?.id  // Include userId in test ping
+    });
   }
 }
 
