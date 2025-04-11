@@ -78,13 +78,7 @@ const SettingsPage: React.FC = () => {
                 <Shield className="w-4 h-4 mr-2" />
                 Security
               </TabsTrigger>
-              <TabsTrigger
-                value="database"
-                className="justify-start text-left px-4 py-3"
-              >
-                <Database className="w-4 h-4 mr-2" />
-                Database
-              </TabsTrigger>
+                                     
               <TabsTrigger
                 value="notifications"
                 className="justify-start text-left px-4 py-3"

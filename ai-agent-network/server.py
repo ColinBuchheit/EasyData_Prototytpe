@@ -88,8 +88,6 @@ async def service_health():
         redis_status = "error"
         redis_message = str(e)
     
-    # You could add more service checks here
-    
     return {
         "status": "ok" if redis_status == "ok" else "degraded",
         "version": "1.0.0",
@@ -110,3 +108,10 @@ async def service_health():
 @app.get("/")
 async def root():
     return {"status": "ok", "message": "AI-Agent-Network is running", "version": "1.0.0"}
+
+
+# === Entrypoint for local development
+if __name__ == "__main__":
+    import uvicorn
+    print("🚀 Starting AI Agent Network on http://0.0.0.0:8000")
+    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
