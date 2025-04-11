@@ -91,7 +91,6 @@ const uiSlice = createSlice({
         id,
         ...action.payload,
       });
-      return { ...state, id };
     },
     removeToast: (state, action: PayloadAction<string>) => {
       state.toasts = state.toasts.filter(toast => toast.id !== action.payload);

@@ -1,4 +1,3 @@
-// src/store/slices/databaseSlice.ts
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
 import { databaseApi } from '../../api/database.api';
 import { 
@@ -51,6 +50,7 @@ export const createConnection = createAsyncThunk(
   }
 );
 
+// Fixed testConnection thunk
 export const testConnection = createAsyncThunk(
   'database/testConnection',
   async (connectionData: DbConnectionRequest, { rejectWithValue }) => {
@@ -65,18 +65,17 @@ export const testConnection = createAsyncThunk(
     }
   }
 );
-
-export const fetchDatabaseMetadata = createAsyncThunk(
-  'database/fetchDatabaseMetadata',
-  async (dbId: number, { rejectWithValue }) => {
+export const fetchUserConnections = createAsyncThunk(
+  'database/fetchUserConnections',
+  async (_, { rejectWithValue }) => {
     try {
-      const response = await databaseApi.getDatabaseMetadata(dbId);
+      const response = await databaseApi.getUserConnections();
       if (!response.success) {
-        return rejectWithValue(response.message || 'Failed to fetch database metadata');
+        return rejectWithValue(response.message || 'Failed to fetch database connections');
       }
       return response.data;
     } catch (error: any) {
-      return rejectWithValue(error.response?.data?.message || error.message || 'Failed to fetch database metadata');
+      return rejectWithValue(error.response?.data?.message || error.message || 'Failed to fetch database connections');
     }
   }
 );

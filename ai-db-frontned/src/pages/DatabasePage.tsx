@@ -1,4 +1,4 @@
-// src/pages/DatabasePage.tsx (fixed Tabs structure)
+// src/pages/DatabasePage.tsx
 import React, { useEffect, useState } from 'react';
 import ConnectionForm from '../components/database/ConnectionForm';
 import ConnectionList from '../components/database/ConnectionList';
@@ -15,6 +15,7 @@ import { cn } from '../utils/format.utils';
 import { formatConnectionString, getDatabaseTypeName } from '../utils/db-format.utils';
 import Input from '../components/common/Input';
 import { isValidHostname, isValidPort } from '../utils/validation.utils';
+import { DatabaseType, DbConnectionRequest } from '../types/database.types';
 
 const DatabasePage: React.FC = () => {
   const dispatch = useAppDispatch();
@@ -31,25 +32,25 @@ const DatabasePage: React.FC = () => {
   const [expandedConnections, setExpandedConnections] = useState<Record<number, boolean>>({});
   const [isRefreshing, setIsRefreshing] = useState(false);
   
-  // New connection form
-  const [newConnection, setNewConnection] = useState({
-    connection_name: '',
-    db_type: 'postgres' as any, // Using DatabaseType from your types
+  // New connection form - UPDATED to match backend expectations
+  const [newConnection, setNewConnection] = useState<DbConnectionRequest>({
+    dbType: 'postgres',
     host: '',
     port: 5432,
     username: '',
     password: '',
-    database_name: ''
+    dbName: '',
+    connectionName: ''
   });
   
-  // Form errors
+  // Form errors - UPDATED to match new field names
   const [formErrors, setFormErrors] = useState({
-    connection_name: '',
+    connectionName: '',
     host: '',
     port: '',
     username: '',
     password: '',
-    database_name: ''
+    dbName: ''
   });
   
   // Fetch schema when selected connection changes
@@ -59,7 +60,7 @@ const DatabasePage: React.FC = () => {
     }
   }, [selectedConnection?.id, dispatch, isAuthenticated]);
 
-  const handleConnectionSubmit = (data: any) => {
+  const handleConnectionSubmit = (data: DbConnectionRequest) => {
     dispatch(createConnection(data));
     setShowNewConnectionModal(false);
   };
@@ -79,7 +80,7 @@ const DatabasePage: React.FC = () => {
     }));
   };
   
-  // Handler functions - same as before
+  // UPDATED: handleInputChange to use new field names
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     
@@ -93,7 +94,8 @@ const DatabasePage: React.FC = () => {
     setFormErrors(prev => ({ ...prev, [name]: '' }));
   };
   
-  const handleDbTypeChange = (type: any) => {
+  // UPDATED: handleDbTypeChange to use correct field name
+  const handleDbTypeChange = (type: DatabaseType) => {
     setNewConnection(prev => {
       let port = prev.port;
       
@@ -106,27 +108,28 @@ const DatabasePage: React.FC = () => {
         default: port = 5432;
       }
       
-      return { ...prev, db_type: type, port };
+      return { ...prev, dbType: type, port };
     });
   };
   
+  // UPDATED: validateForm to use new field names
   const validateForm = () => {
     const errors = {
-      connection_name: '',
+      connectionName: '',
       host: '',
       port: '',
       username: '',
       password: '',
-      database_name: ''
+      dbName: ''
     };
     let isValid = true;
     
-    if (!newConnection.database_name.trim()) {
-      errors.database_name = 'Database name is required';
+    if (!newConnection.dbName.trim()) {
+      errors.dbName = 'Database name is required';
       isValid = false;
     }
     
-    if (newConnection.db_type !== 'sqlite') {
+    if (newConnection.dbType !== 'sqlite') {
       if (!newConnection.host.trim()) {
         errors.host = 'Host is required';
         isValid = false;
@@ -158,26 +161,31 @@ const DatabasePage: React.FC = () => {
     return isValid;
   };
   
+  // UPDATED: handleCreateConnection to directly use the properly formatted data
   const handleCreateConnection = () => {
     if (!validateForm()) {
       return;
     }
     
+    // Pass the connection data directly to handleConnectionSubmit
+    // Now the data is already in the correct format
     handleConnectionSubmit(newConnection);
     
-    dispatch(addToast({
-      type: 'success',
-      message: 'Connection created successfully',
-    }));
+    // Show success toast AFTER the API call is complete
+    // This will be handled in the thunk when createConnection is successful
     
+    // Close modal
+    setShowNewConnectionModal(false);
+    
+    // Reset form with new field names
     setNewConnection({
-      connection_name: '',
-      db_type: 'postgres',
+      dbType: 'postgres',
       host: '',
       port: 5432,
       username: '',
       password: '',
-      database_name: ''
+      dbName: '',
+      connectionName: ''
     });
   };
   
@@ -230,7 +238,6 @@ const DatabasePage: React.FC = () => {
     <div className="container mx-auto py-6 px-4">
       <h1 className="text-2xl font-bold mb-6 text-zinc-100">Database Management</h1>
       
-      {/* FIXED TABS STRUCTURE */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="mb-6">
         <TabsList>
           <TabsTrigger value="connections">
@@ -243,7 +250,6 @@ const DatabasePage: React.FC = () => {
           </TabsTrigger>
         </TabsList>
         
-        {/* TabsContent components INSIDE the Tabs component */}
         <TabsContent value="connections">
           <div className="flex justify-between items-center mb-4">
             <div>
@@ -384,7 +390,6 @@ const DatabasePage: React.FC = () => {
                       {/* Expanded Connection Details */}
                       {isExpanded && (
                         <div className="mt-4 pt-4 border-t border-zinc-700">
-                          {/* Connection details content - same as before */}
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div className="space-y-2">
                               <h4 className="text-sm font-medium text-zinc-300">Connection Details</h4>
@@ -565,16 +570,15 @@ const DatabasePage: React.FC = () => {
         title="Add Database Connection"
         description="Connect to a new database to query it with natural language."
       >
-        {/* Modal content - same as before */}
         <div className="space-y-4">
-          {/* Form fields - same as before */}
+          {/* Updated form fields to use new field names */}
           <Input
             label="Connection Name (Optional)"
-            name="connection_name"
-            value={newConnection.connection_name}
+            name="connectionName"
+            value={newConnection.connectionName}
             onChange={handleInputChange}
             placeholder="My Database"
-            error={formErrors.connection_name}
+            error={formErrors.connectionName}
             hint="Give your connection a friendly name to help identify it"
           />
           
@@ -588,10 +592,10 @@ const DatabasePage: React.FC = () => {
                 <button
                   key={type}
                   type="button"
-                  onClick={() => handleDbTypeChange(type)}
+                  onClick={() => handleDbTypeChange(type as DatabaseType)}
                   className={cn(
                     "p-2 rounded-md border text-center text-sm",
-                    newConnection.db_type === type
+                    newConnection.dbType === type
                       ? "bg-blue-600 border-blue-500 text-white"
                       : "bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700"
                   )}
@@ -603,7 +607,7 @@ const DatabasePage: React.FC = () => {
           </div>
           
           {/* Connection Info */}
-          {newConnection.db_type !== 'sqlite' && (
+          {newConnection.dbType !== 'sqlite' && (
             <>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Input
@@ -652,11 +656,11 @@ const DatabasePage: React.FC = () => {
           {/* Database Name */}
           <Input
             label="Database Name"
-            name="database_name"
-            value={newConnection.database_name}
+            name="dbName"
+            value={newConnection.dbName}
             onChange={handleInputChange}
             placeholder="my_database"
-            error={formErrors.database_name}
+            error={formErrors.dbName}
           />
         </div>
         

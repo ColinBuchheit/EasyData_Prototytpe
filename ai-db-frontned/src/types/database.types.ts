@@ -39,6 +39,7 @@ export interface ConnectionTestResult {
   error?: string;
 }
 
+// Other interfaces remain unchanged
 export interface ConnectionHealthStatus {
   id: number;
   dbName: string;
