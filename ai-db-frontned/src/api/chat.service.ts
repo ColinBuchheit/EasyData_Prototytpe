@@ -28,10 +28,12 @@ export class ChatService {
 
   public async connect(): Promise<boolean> {
     if (this.socket?.readyState === WebSocket.OPEN) {
+      console.log('WebSocket already connected');
       return true;
     }
 
     if (this.isConnecting) {
+      console.log('WebSocket connection already in progress');
       return new Promise((resolve) => {
         const checkInterval = setInterval(() => {
           if (this.socket?.readyState === WebSocket.OPEN) {
@@ -46,20 +48,24 @@ export class ChatService {
     }
 
     this.isConnecting = true;
+    console.log('Attempting to connect to WebSocket');
 
     return new Promise((resolve) => {
       const token = getToken();
       if (!token) {
+        console.error('No authentication token available');
         this.isConnecting = false;
         resolve(false);
         return;
       }
 
       try {
+        // Include token in the connection URL
         this.socket = new WebSocket(`${this.url}?token=${token}`);
+        console.log('WebSocket constructor called, waiting for connection');
 
         this.socket.onopen = () => {
-          console.log('WebSocket connected');
+          console.log('WebSocket connected successfully');
           this.reconnectAttempts = 0;
           this.isConnecting = false;
           
@@ -69,7 +75,10 @@ export class ChatService {
           // Send any queued messages
           while (this.messageQueue.length > 0) {
             const msg = this.messageQueue.shift();
-            if (msg) this.sendMessage(msg.type, msg.data);
+            if (msg) {
+              console.log('Sending queued message:', msg);
+              this.sendMessage(msg.type, msg.data);
+            }
           }
           
           // Notify listeners
@@ -117,6 +126,7 @@ export class ChatService {
         };
 
         this.socket.onmessage = (event) => {
+          console.log('Received message from server:', event.data);
           this.handleMessage(event);
         };
       } catch (error) {
@@ -128,8 +138,15 @@ export class ChatService {
   }
 
   public sendMessage(type: string, data: any): boolean {
+    // Log message before sending
+    console.log(`Attempting to send WebSocket message type: '${type}'`);
+    console.log('Message data:', data);
+    console.log('WebSocket state:', this.socket ? 
+      ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'][this.socket.readyState] : 'null');
+    
+    // Check if socket is open
     if (this.socket?.readyState !== WebSocket.OPEN) {
-      // Queue the message if not connected
+      console.log('WebSocket not open, queueing message');
       this.messageQueue.push({ type, data });
       
       // Try to connect
@@ -138,8 +155,16 @@ export class ChatService {
     }
 
     try {
-      const message = JSON.stringify({ type, data });
-      this.socket.send(message);
+      // Format data properly ensuring numbers are numbers, not objects or strings
+      if (data && typeof data === 'object') {
+        if (data.dbId !== undefined) {
+          data.dbId = Number(data.dbId) || null;
+        }
+      }
+      
+      const messageStr = JSON.stringify({ type, data });
+      console.log('Sending WebSocket message:', messageStr);
+      this.socket.send(messageStr);
       return true;
     } catch (error) {
       console.error('Failed to send WebSocket message:', error);
@@ -148,6 +173,8 @@ export class ChatService {
   }
 
   public sendQuery(task: string, dbId?: number): boolean {
+    console.log('sendQuery called with task:', task, 'dbId:', dbId);
+    
     store.dispatch(updateQueryStatus({ 
       status: QueryStatus.PROCESSING, 
       message: 'Processing your query...' 
@@ -156,7 +183,7 @@ export class ChatService {
     // Clear any previous progress updates
     store.dispatch(clearProgressUpdates());
     
-    // Add user message to chat if not already added (could be added in useChat.ts)
+    // Add user message to chat if not already added
     const state = store.getState();
     const lastMessage = state.chat.messages[state.chat.messages.length - 1];
     
@@ -169,11 +196,17 @@ export class ChatService {
       }));
     }
     
-    return this.sendMessage('query', { 
-      task, 
-      dbId, 
-      sessionId: state.chat.currentSessionId 
-    });
+    // Format data according to NaturalLanguageQueryRequest model
+    const queryData = {
+      task: task,
+      dbId: dbId ? Number(dbId) : undefined, 
+      visualize: true
+    };
+    
+    console.log('Formatted query data:', queryData);
+    
+    // Send the query message
+    return this.sendMessage('query', queryData);
   }
 
   public sendNaturalLanguageQuery(task: string, dbId?: number): boolean {
@@ -182,6 +215,7 @@ export class ChatService {
 
   public disconnect(): void {
     if (this.socket) {
+      console.log('Disconnecting WebSocket');
       this.socket.close();
       this.socket = null;
     }
@@ -207,6 +241,7 @@ export class ChatService {
     // Send ping every 30 seconds to keep connection alive
     this.pingInterval = setInterval(() => {
       if (this.isConnected()) {
+        console.log('Sending ping to keep connection alive');
         this.sendMessage('ping', { timestamp: Date.now() });
       }
     }, 30000);
@@ -252,8 +287,14 @@ export class ChatService {
 
   private handleMessage(event: MessageEvent): void {
     try {
+      console.log('Received WebSocket message:', event.data);
       const message: WebSocketMessage = JSON.parse(event.data);
-
+      
+      // Log parsed message
+      console.log('Parsed WebSocket message type:', message.type);
+      console.log('Message data:', message.data);
+      console.log('Message content:', message.message || 'no message');
+      
       // Notify any registered listeners for this message type
       this.notifyListeners(message.type, message.data);
 
@@ -412,6 +453,12 @@ export class ChatService {
   // Check if connected
   public isConnected(): boolean {
     return this.socket?.readyState === WebSocket.OPEN;
+  }
+  
+  // Debug method to test connection
+  public testConnection(): boolean {
+    console.log('Testing WebSocket connection');
+    return this.sendMessage('ping', { timestamp: Date.now() });
   }
 }
 

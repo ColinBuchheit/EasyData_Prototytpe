@@ -59,6 +59,7 @@ export const useChat = () => {
   }, [initializeWebSocket, isConnected]);
 
   // In useChat.ts, change this line:
+// in src/hooks/useChat.ts
 const startNewSession = useCallback(async (title?: string) => {
   try {
     // Ensure we're connected before creating a session
@@ -73,8 +74,9 @@ const startNewSession = useCallback(async (title?: string) => {
       sessionId
     })).unwrap();
     
-    // Notify server about new session
-    chatService.sendMessage('newSession', { sessionId: session.id });
+    // Don't send 'newSession' message as it's not supported by the backend
+    // Just log the session creation locally
+    console.log('Created new chat session locally:', session.id);
     
     return session;
   } catch (error) {
@@ -86,7 +88,6 @@ const startNewSession = useCallback(async (title?: string) => {
     return null;
   }
 }, [dispatch, initializeWebSocket, isConnected]);
-
   const switchSession = useCallback((sessionId: string) => {
     dispatch(setCurrentSession(sessionId));
     
@@ -163,7 +164,6 @@ const startNewSession = useCallback(async (title?: string) => {
       }));
     }
   }, [dispatch, initializeWebSocket, isConnected]);
-
   const removeSession = useCallback((sessionId: string) => {
     dispatch(deleteSession(sessionId));
     

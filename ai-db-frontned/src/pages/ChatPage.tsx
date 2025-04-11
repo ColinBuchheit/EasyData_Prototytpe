@@ -60,19 +60,20 @@ const ChatPage: React.FC = () => {
   }, [selectedConnection, dispatch]);
   
   // Initialize WebSocket connection
-  useEffect(() => {
-    const initConnection = async () => {
-      const connected = await initializeWebSocket();
-      if (!connected) {
-        dispatch(addToast({
-          type: 'error',
-          message: 'Failed to connect to chat service'
-        }));
-      }
-    };
-    
-    initConnection();
-  }, [initializeWebSocket, dispatch]);
+ // Initialize WebSocket connection
+useEffect(() => {
+  const initConnection = async () => {
+    const connected = await initializeWebSocket();
+    if (!connected) {
+      dispatch(addToast({
+        type: 'error',
+        message: 'Failed to connect to chat service'
+      }));
+    }
+  };
+  
+  initConnection();
+}, [initializeWebSocket, dispatch]);
   
   // Fetch connections and query history on mount
   useEffect(() => {
