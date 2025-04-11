@@ -172,42 +172,60 @@ export class ChatService {
     }
   }
 
-  public sendQuery(task: string, dbId?: number): boolean {
-    console.log('sendQuery called with task:', task, 'dbId:', dbId);
-    
-    store.dispatch(updateQueryStatus({ 
-      status: QueryStatus.PROCESSING, 
-      message: 'Processing your query...' 
+  // Modified sendQuery function for chat.service.ts
+public sendQuery(task: string, dbId?: number): boolean {
+  // Ensure dbId is a proper number if provided
+  const parsedDbId = dbId !== undefined ? Number(dbId) : undefined;
+  
+  // Validate dbId is actually a number and not NaN
+  if (parsedDbId !== undefined && isNaN(parsedDbId)) {
+    console.error('Invalid database ID provided:', dbId);
+    store.dispatch(addToast({
+      type: 'error',
+      message: 'Invalid database ID format'
     }));
-    
-    // Clear any previous progress updates
-    store.dispatch(clearProgressUpdates());
-    
-    // Add user message to chat if not already added
-    const state = store.getState();
-    const lastMessage = state.chat.messages[state.chat.messages.length - 1];
-    
-    if (!lastMessage || lastMessage.role !== 'user' || lastMessage.content !== task) {
-      store.dispatch(addMessage({
-        id: uuidv4(),
-        role: 'user',
-        content: task,
-        timestamp: new Date().toISOString()
-      }));
-    }
-    
-    // Format data according to NaturalLanguageQueryRequest model
-    const queryData = {
-      task: task,
-      dbId: dbId ? Number(dbId) : undefined, 
-      visualize: true
-    };
-    
-    console.log('Formatted query data:', queryData);
-    
-    // Send the query message
-    return this.sendMessage('query', queryData);
+    return false;
   }
+  
+  // Update UI state to show processing
+  store.dispatch(updateQueryStatus({ 
+    status: QueryStatus.PROCESSING, 
+    message: 'Processing your query...' 
+  }));
+  
+  // Clear any previous progress updates
+  store.dispatch(clearProgressUpdates());
+  
+  // Get current state
+  const state = store.getState();
+  
+  // Add user message to chat if needed
+  const lastMessage = state.chat.messages[state.chat.messages.length - 1];
+  if (!lastMessage || lastMessage.role !== 'user' || lastMessage.content !== task) {
+    store.dispatch(addMessage({
+      id: uuidv4(),
+      role: 'user',
+      content: task,
+      timestamp: new Date().toISOString()
+    }));
+  }
+  
+  // Prepare message payload - only include dbId if it's valid
+  const messagePayload: any = { 
+    task, 
+    sessionId: state.chat.currentSessionId 
+  };
+  
+  // Add dbId to payload only if it's a valid number
+  if (parsedDbId !== undefined) {
+    messagePayload.dbId = parsedDbId;
+  }
+  
+  console.log('Sending query with payload:', messagePayload);
+  
+  // Send the message with proper payload
+  return this.sendMessage('query', messagePayload);
+}
 
   public sendNaturalLanguageQuery(task: string, dbId?: number): boolean {
     return this.sendQuery(task, dbId);
