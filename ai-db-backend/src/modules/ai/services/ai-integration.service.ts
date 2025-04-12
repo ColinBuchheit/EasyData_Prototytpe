@@ -23,6 +23,19 @@ const API_ENDPOINTS = {
   VISUALIZE: '/api/v1/visualize'
 };
 
+// Define the expected AI Agent request interface
+interface AIAgentRequest {
+  task: string;
+  user_id: string;
+  db_info: {
+    id: number;
+    db_type: string;
+    database_name: string;
+    schema?: any;
+  };
+  visualize: boolean;
+}
+
 /**
  * Service for centralized integration with AI agent network
  */
@@ -50,18 +63,21 @@ export class AIIntegrationService {
         schema = await SchemaService.getDbMetadata(request.userId, request.dbId);
       }
       
-      // Prepare request for AI agent network
-      const aiRequest = {
+      // Prepare request for AI agent network - ensure proper type formatting
+      const aiRequest: AIAgentRequest = {
         task: request.task,
-        user_id: request.userId.toString(),
+        user_id: request.userId.toString(), // Ensure user_id is a string
         db_info: {
           id: request.dbId,
           db_type: request.dbType,
           database_name: request.dbName,
           schema: schema
         },
-        visualize: request.options?.visualize || true
+        visualize: request.options?.visualize ?? true
       };
+      
+      // Log the request payload for debugging
+      aiIntegrationLogger.debug(`Sending payload to AI agent: ${JSON.stringify(aiRequest)}`);
       
       // Call AI agent network with retry logic
       const response = await this.callWithRetry(aiRequest);
@@ -98,7 +114,7 @@ export class AIIntegrationService {
   /**
    * Call AI agent network with retry logic
    */
-  private static async callWithRetry(request: any, attempts = RETRY_ATTEMPTS): Promise<any> {
+  private static async callWithRetry(request: AIAgentRequest, attempts = RETRY_ATTEMPTS): Promise<any> {
     try {
       aiIntegrationLogger.info(`Calling AI agent at ${AI_AGENT_URL}${API_ENDPOINTS.RUN}`);
       
@@ -120,6 +136,17 @@ export class AIIntegrationService {
       if (axios.isAxiosError(error) && error.response?.status === 404) {
         aiIntegrationLogger.error(`AI agent endpoint not found: ${AI_AGENT_URL}${API_ENDPOINTS.RUN}`);
         throw new Error(`AI agent endpoint not found: ${AI_AGENT_URL}${API_ENDPOINTS.RUN}. Check API configuration.`);
+      }
+      
+      // Handle 422 validation errors - log detailed information
+      if (axios.isAxiosError(error) && error.response?.status === 422) {
+        const responseData = error.response.data;
+        aiIntegrationLogger.error(`AI agent validation error (422): ${JSON.stringify(responseData)}`);
+        
+        // Log request that caused the error
+        aiIntegrationLogger.error(`Request that caused 422 error: ${JSON.stringify(request)}`);
+        
+        throw new Error(`AI agent validation error: ${responseData?.detail || JSON.stringify(responseData) || "Invalid request format"}`);
       }
       
       if (attempts <= 1) {

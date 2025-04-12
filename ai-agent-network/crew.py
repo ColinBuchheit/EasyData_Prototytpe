@@ -84,6 +84,7 @@ def run_crew_pipeline(task: str, user_id: str, db_info: Dict[str, Any], visualiz
         context = get_context(user_id) or {}
         logger.info(f"📦 Loaded context for user {user_id}: {len(context.keys())} keys")
 
+        # First, run the schema task to see if it's a general conversation
         schema_task = Task(
             identifier="schema_task",
             description="Extract and organize the database schema",
@@ -93,10 +94,65 @@ def run_crew_pipeline(task: str, user_id: str, db_info: Dict[str, Any], visualiz
                 "description": "Database connection and adapter used for schema extraction",
                 "expected_output": "Structured representation of database schema (tables, columns, types)",
                 "db": db,
-                "adapter": adapter
+                "adapter": adapter,
+                "db_info": db_info,
+                "user_id": user_id,
+                "task": task  # Pass the task to help detect general conversation
             }]
         )
 
+        # Execute just the schema task first
+        schema_crew = Crew(
+            agents=[crew_schema_agent],
+            tasks=[schema_task],
+            verbose=True,
+            process="sequential"
+        )
+        
+        schema_result = schema_crew.kickoff()
+        schema_output = getattr(schema_result, "schema_task", {})
+        
+        # Check if this is a general conversation
+        if isinstance(schema_output, dict) and schema_output.get("is_general_conversation", False):
+            logger.info(f"🗣️ Detected general conversation for task: {task}")
+            
+            # Process with chat agent instead
+            chat_task = Task(
+                identifier="chat_task",
+                description=f"Respond to general conversation: {task}",
+                agent=crew_chat_agent,
+                expected_output="Friendly conversation response",
+                context=[{
+                    "description": "Respond to general user conversation",
+                    "expected_output": "Friendly, helpful response",
+                    "task": task,
+                    "is_general_conversation": True
+                }]
+            )
+            
+            chat_crew = Crew(
+                agents=[crew_chat_agent],
+                tasks=[chat_task],
+                verbose=True,
+                process="sequential"
+            )
+            
+            chat_result = chat_crew.kickoff()
+            chat_output = getattr(chat_result, "chat_task", "")
+            
+            return {
+                "success": True,
+                "final_output": {
+                    "text": chat_output,
+                    "is_general_conversation": True
+                },
+                "agents_called": ["schema_agent", "chat_agent"]
+            }
+
+        # Continue with regular DB query pipeline if not a general conversation
+        append_to_context(user_id, {"schema": schema_output})
+
+        # Now proceed with query generation
         query_task = Task(
             identifier="query_task",
             description=f"Generate a database query for task: {task}",
@@ -107,26 +163,19 @@ def run_crew_pipeline(task: str, user_id: str, db_info: Dict[str, Any], visualiz
                 "expected_output": "A valid SQL or NoSQL query",
                 "task": task,
                 "db_type": db.db_type,
-                "schema": context.get("schema", {})  # Pass existing schema if available
-            }],
-            dependencies=[schema_task]
+                "schema": schema_output  # Pass schema from previous step
+            }]
         )
 
-        crew_tasks = [schema_task, query_task]
-        agents_called = ["schema_agent", "query_agent"]
-
-        crew = Crew(
-            agents=[crew_schema_agent, crew_query_agent, crew_validation_agent, crew_visualization_agent, crew_chat_agent],
-            tasks=crew_tasks,
+        query_crew = Crew(
+            agents=[crew_query_agent],
+            tasks=[query_task],
             verbose=True,
             process="sequential"
         )
-
-        logger.info(f"🚀 Starting CrewAI pipeline for user {user_id} with task: {task}")
-        initial_results = crew.kickoff()
-
-        schema_output = getattr(initial_results, "schema_task", {})
-        query_output = getattr(initial_results, "query_task", "")
+        
+        query_result = query_crew.kickoff()
+        query_output = getattr(query_result, "query_task", "")
 
         # Safely extract query string
         if isinstance(query_output, dict):
@@ -136,8 +185,16 @@ def run_crew_pipeline(task: str, user_id: str, db_info: Dict[str, Any], visualiz
         else:
             query_str = ""
 
-        append_to_context(user_id, {"schema": schema_output})
         append_to_context(user_id, {"query": query_output})
+        
+        # Continue with validation, only if we got a valid query string
+        if not query_str or len(query_str.strip()) < 5:  # Very short query strings are likely errors
+            logger.warning(f"⚠️ No valid query string generated for task: {task}")
+            return {
+                "success": False,
+                "error": "Failed to generate a valid database query for your request.",
+                "agents_called": ["schema_agent", "query_agent"]
+            }
 
         # Validation Step
         validation_task = Task(
@@ -163,8 +220,6 @@ def run_crew_pipeline(task: str, user_id: str, db_info: Dict[str, Any], visualiz
 
         validation_results = validation_crew.kickoff()
         validation_raw = getattr(validation_results, "validation_task", "{}")
-
-        # New enhanced validation parsing logic to replace the current block in crew.py
 
         # Clean and parse output (improved parsing logic)
         logger.debug(f"🧪 Raw validation output type: {type(validation_raw)}, content: {validation_raw}")
@@ -203,26 +258,23 @@ def run_crew_pipeline(task: str, user_id: str, db_info: Dict[str, Any], visualiz
 
         logger.debug(f"Final validation result - valid: {is_valid}, reason: {reason}")
 
-        # Safely extract validity and reason with proper fallbacks
-        is_valid = validation_output.get("valid", False)
-        reason = validation_output.get("reason", "No reason provided")
-
         if not is_valid:
             logger.warning(f"⚠️ Query validation failed for user {user_id}: {reason}")
             return {
                 "success": False,
                 "error": f"Query failed validation checks: {reason}",
-                "agents_called": agents_called
+                "agents_called": ["schema_agent", "query_agent", "validation_agent"]
             }
 
         logger.info(f"✅ Query passed validation: {reason}")
+        
         # Execute the query
         if not isinstance(query_str, str) or not query_str.strip():
             logger.error("⚠️ Query output is not a valid string.")
             return {
                 "success": False,
                 "error": "Query generation did not return a valid string.",
-                "agents_called": agents_called
+                "agents_called": ["schema_agent", "query_agent", "validation_agent"]
             }
 
         db_response = execute_db_query(query_str, db_info, user_id)
@@ -232,7 +284,7 @@ def run_crew_pipeline(task: str, user_id: str, db_info: Dict[str, Any], visualiz
             return {
                 "success": False,
                 "error": f"Database query execution failed: {db_response.get('error')}",
-                "agents_called": agents_called
+                "agents_called": ["schema_agent", "query_agent", "validation_agent"]
             }
 
         if not db_response or "rows" not in db_response:
@@ -241,11 +293,12 @@ def run_crew_pipeline(task: str, user_id: str, db_info: Dict[str, Any], visualiz
                 "success": False,
                 "error": "No data returned from database.",
                 "query": query_str,
-                "agents_called": agents_called
+                "agents_called": ["schema_agent", "query_agent", "validation_agent"]
             }
 
         # Continue to Visualization and Chat Agents
         remaining_tasks = []
+        agents_called = ["schema_agent", "query_agent", "validation_agent"]
 
         if visualize:
             visualization_task = Task(
@@ -261,7 +314,7 @@ def run_crew_pipeline(task: str, user_id: str, db_info: Dict[str, Any], visualiz
                 }]
             )
             remaining_tasks.append(visualization_task)
-            agents_called.append("analysis_visualization_agent")
+            agents_called.append("visualization_agent")
 
         chat_task = Task(
             identifier="chat_task",

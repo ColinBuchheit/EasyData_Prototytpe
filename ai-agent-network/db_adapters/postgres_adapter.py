@@ -10,6 +10,29 @@ class PostgresAdapter(BaseDBAdapter):
             password=db.encrypted_password,
             dbname=db.database_name
         )
+    
+    def connect(self, db: UserDatabase):
+        """
+        Connect to the database
+        
+        Args:
+            db: UserDatabase configuration
+            
+        Returns:
+            Connection object
+        """
+        return self._connect(db)
+    
+    def disconnect(self, db: UserDatabase) -> None:
+        """
+        Disconnect from the database
+        
+        Args:
+            db: UserDatabase configuration
+        """
+        # The postgres adapter doesn't maintain persistent connections
+        # But we implement this method to satisfy the abstract base class
+        pass
 
     def fetch_tables(self, db: UserDatabase):
         conn = self._connect(db)

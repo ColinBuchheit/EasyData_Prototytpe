@@ -29,9 +29,10 @@ def fetch_query_result(query: str, db_info: Dict[str, Any], user_id: str) -> Opt
 
 def fetch_schema_for_user_db(db_info: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     """
-    Retrieves schema from backend if not using local adapter.
+    Retrieves schema from backend instead of direct DB connection.
     """
     try:
+        logger.info(f"Fetching schema from backend for user {user_id}")
         response = requests.post(f"{BACKEND_API_URL}/api/schema/fetch", json={
             "db_info": db_info,
             "user_id": user_id
@@ -40,8 +41,31 @@ def fetch_schema_for_user_db(db_info: Dict[str, Any], user_id: str) -> Dict[str,
             "Authorization": f"Bearer {get_backend_token()}"
         })
         response.raise_for_status()
-        logger.info(f"✅ Schema fetched from backend for user {user_id}")
-        return response.json()
+        
+        schema_result = response.json()
+        
+        # Log success with number of tables found
+        if "schema" in schema_result and "tables" in schema_result["schema"]:
+            num_tables = len(schema_result["schema"]["tables"])
+            logger.info(f"✅ Schema fetched from backend for user {user_id} - Found {num_tables} tables")
+        else:
+            logger.warning(f"⚠️ Schema response missing expected structure for user {user_id}")
+        
+        return schema_result
+    except requests.exceptions.RequestException as e:
+        if hasattr(e, 'response') and e.response:
+            status_code = e.response.status_code
+            error_detail = f"Status code: {status_code}"
+            try:
+                error_json = e.response.json()
+                error_detail += f", Message: {error_json.get('message', 'No details provided')}"
+            except:
+                pass
+            logger.error(f"❌ Backend request failed for schema fetch: {error_detail}")
+        else:
+            logger.error(f"❌ Connection error with backend for schema fetch: {e}")
+        
+        return {"success": False, "error": str(e)}
     except Exception as e:
         logger.error(f"❌ Failed to fetch schema for user {user_id}: {e}")
         return {"success": False, "error": str(e)}

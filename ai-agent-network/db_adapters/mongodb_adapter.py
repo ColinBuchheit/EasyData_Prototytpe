@@ -5,6 +5,29 @@ class MongoDBAdapter(BaseDBAdapter):
     def _connect(self, db: UserDatabase):
         uri = f"mongodb://{db.username}:{db.encrypted_password}@{db.host}:{db.port}"
         return MongoClient(uri)[db.database_name]
+        
+    def connect(self, db: UserDatabase):
+        """
+        Connect to the database
+        
+        Args:
+            db: UserDatabase configuration
+            
+        Returns:
+            Connection object
+        """
+        return self._connect(db)
+    
+    def disconnect(self, db: UserDatabase) -> None:
+        """
+        Disconnect from the database
+        
+        Args:
+            db: UserDatabase configuration
+        """
+        # MongoDB adapter doesn't maintain persistent connections
+        # But we implement this method to satisfy the abstract base class
+        pass
 
     def fetch_tables(self, db: UserDatabase):
         client = self._connect(db)
