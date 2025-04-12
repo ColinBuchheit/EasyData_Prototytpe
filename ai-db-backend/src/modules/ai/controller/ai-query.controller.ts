@@ -12,6 +12,9 @@ import { QueryService } from '../../query/services/query.service';
 import { AIQueryRequest, NaturalLanguageQueryRequest } from '../../query/models/query.model';
 import { sendMessage } from '../../query/middleware/websocket.middleware';
 
+// Import FallbackService for basic queries when AI is unavailable
+import { FallbackService } from '../../query/services/fallback.service';
+
 const aiQueryLogger = createContextLogger("AIQueryController");
 
 /**
@@ -22,7 +25,7 @@ export const processNaturalLanguageQuery = asyncHandler(async (req: AuthRequest,
     return res.status(401).json({ success: false, message: "Unauthorized: User not authenticated" });
   }
 
-  const { task, dbId: requestDbId, visualize = true }: NaturalLanguageQueryRequest = req.body;
+  const { task, dbId: requestDbId, visualize = true, refresh = false }: NaturalLanguageQueryRequest = req.body;
   
   if (!task || typeof task !== "string") {
     return res.status(400).json({ success: false, message: "Task description is required" });
@@ -70,42 +73,73 @@ export const processNaturalLanguageQuery = asyncHandler(async (req: AuthRequest,
     });
   }
 
-  // Check if we have a cached response for this task
-  const cachedResponse = await AIIntegrationService.getCachedQueryResponse(req.user.id, task);
-  if (cachedResponse && !req.query.refresh) {
-    aiQueryLogger.info(`Using cached response for task: ${task.substring(0, 50)}...`);
-
-    // Set the database as current context
-    await ContextService.setCurrentDatabaseContext(req.user.id, targetDbId);
+  // Check AI agent health before proceeding
+  const aiHealthy = await AIIntegrationService.checkHealth();
+  
+  if (!aiHealthy) {
+    // Try to use the fallback service for simple requests
+    if (targetDbId !== undefined) {
+      try {
+        const fallbackResult = await FallbackService.processBasicQuery(req.user.id, targetDbId, task);
+        if (fallbackResult.success) {
+          return res.json({
+            ...fallbackResult,
+            usingFallback: true,
+            message: fallbackResult.message || "The AI service is currently unavailable. Using a fallback simple query."
+          });
+        }
+      } catch (error) {
+        // If fallback fails, continue to return the standard error
+        aiQueryLogger.error(`Fallback service failed: ${(error as Error).message}`);
+      }
+    }
     
-    // Execute the cached query if needed
-    if (cachedResponse.query && !cachedResponse.results) {
-      const queryResult = await QueryService.executeQuery(req.user.id, {
-        dbId: targetDbId,
-        query: cachedResponse.query
-      });
+    return res.status(503).json({
+      success: false,
+      message: "AI service is currently unavailable. Please try again later.",
+      serviceStatus: "unavailable"
+    });
+  }
+
+  // Check if we have a cached response for this task
+  if (!refresh) {
+    const cachedResponse = await AIIntegrationService.getCachedQueryResponse(req.user.id, task);
+    if (cachedResponse) {
+      aiQueryLogger.info(`Using cached response for task: ${task.substring(0, 50)}...`);
+
+      // Set the database as current context
+      await ContextService.setCurrentDatabaseContext(req.user.id, targetDbId);
       
+      // Execute the cached query if needed
+      if (cachedResponse.query && !cachedResponse.results) {
+        // Execute the query
+        const queryResult = await QueryService.executeQuery(req.user.id, {
+          dbId: targetDbId,
+          query: cachedResponse.query
+        });
+        
+        return res.json({
+          success: true,
+          query: cachedResponse.query,
+          explanation: cachedResponse.explanation,
+          results: queryResult.rows || [],
+          visualizationCode: cachedResponse.visualizationCode,
+          executionTimeMs: queryResult.executionTimeMs || 0,
+          rowCount: queryResult.rowCount || 0,
+          message: "Query executed successfully (cached)",
+          cached: true
+        });
+      }
+      
+      // Fix for duplicate 'success' property by destructuring cachedResponse 
+      // and then adding the success property separately
+      const { success, ...restOfResponse } = cachedResponse;
       return res.json({
         success: true,
-        query: cachedResponse.query,
-        explanation: cachedResponse.explanation,
-        results: queryResult.rows || [],
-        visualizationCode: cachedResponse.visualizationCode,
-        executionTimeMs: queryResult.executionTimeMs || 0,
-        rowCount: queryResult.rowCount || 0,
-        message: "Query executed successfully (cached)",
+        ...restOfResponse,
         cached: true
       });
     }
-    
-    // Fix for duplicate 'success' property by destructuring cachedResponse 
-    // and then adding the success property separately
-    const { success, ...restOfResponse } = cachedResponse;
-    return res.json({
-      success: true,
-      ...restOfResponse,
-      cached: true
-    });
   }
   
   // Prepare the AI request
@@ -115,7 +149,7 @@ export const processNaturalLanguageQuery = asyncHandler(async (req: AuthRequest,
     dbType: database.db_type,
     dbName: database.database_name,
     task,
-    options: { visualize }
+    options: { visualize, refresh }
   };
   
   // Process with AI Integration Service
@@ -133,6 +167,7 @@ export const processNaturalLanguageQuery = asyncHandler(async (req: AuthRequest,
   
   // If AI only generated the query but didn't execute it, execute it now
   if (aiResponse.query && !aiResponse.results) {
+    // Execute the query
     const queryResult = await QueryService.executeQuery(req.user.id, {
       dbId: targetDbId,
       query: aiResponse.query
@@ -181,12 +216,13 @@ export async function processWebSocketQuery(socket: ws.WebSocket, userId: number
   try {
     aiQueryLogger.info(`Processing WebSocket query for user ${userId}`);
     
-    const { task, dbId: requestDbId, visualize = true } = data;
+    const { task, dbId: requestDbId, visualize = true, refresh = false } = data;
     
     if (!task) {
       sendMessage(socket, {
         type: "error",
-        message: "Task description is required"
+        message: "Task description is required",
+        errorCode: "MISSING_TASK"
       });
       return;
     }
@@ -216,6 +252,7 @@ export async function processWebSocketQuery(socket: ws.WebSocket, userId: number
     let targetDbId = requestDbId;
     
     if (targetDbId === undefined) {
+      sendProgressUpdate(socket, "decision", "Determining which database to use...");
       // Fix for type mismatch
       const selectedDbId = await ContextService.selectDatabaseForQuery(userId, task);
       targetDbId = selectedDbId ?? undefined;
@@ -228,7 +265,8 @@ export async function processWebSocketQuery(socket: ws.WebSocket, userId: number
       if (targetDbId === undefined) {
         sendMessage(socket, {
           type: "error",
-          message: "Could not determine which database to use. Please specify a database."
+          message: "Could not determine which database to use. Please specify a database.",
+          errorCode: "DB_UNDEFINED"
         });
         return;
       }
@@ -240,38 +278,100 @@ export async function processWebSocketQuery(socket: ws.WebSocket, userId: number
     if (!database) {
       sendMessage(socket, {
         type: "error",
-        message: `Database ${targetDbId} not found.`
+        message: `Database ${targetDbId} not found.`,
+        errorCode: "DB_NOT_FOUND"
       });
       return;
     }
     
     sendProgressUpdate(socket, "decision", `Connected to ${database.database_name || "database"}`);
     
+    // Check AI agent health before proceeding
+    sendProgressUpdate(socket, "system_check", "Checking AI service availability...");
+    const wsAiHealthy = await AIIntegrationService.checkHealth();
+    
+    if (!wsAiHealthy) {
+      // Try to use the fallback service for simple requests
+      sendProgressUpdate(socket, "fallback", "Using fallback query generation...");
+      try {
+        const fallbackResult = await FallbackService.processBasicQuery(userId, targetDbId, task);
+        if (fallbackResult.success) {
+          sendMessage(socket, {
+            type: "queryResult",
+            data: {
+              ...fallbackResult,
+              dbId: targetDbId,
+              dbName: database.database_name || "database",
+              usingFallback: true,
+              message: fallbackResult.message || "The AI service is currently unavailable. Using a fallback simple query."
+            }
+          });
+          return;
+        }
+      } catch (error) {
+        // If fallback fails, continue to return the standard error
+        aiQueryLogger.error(`Fallback service failed: ${(error as Error).message}`);
+      }
+
+      sendMessage(socket, {
+        type: "error",
+        message: "AI service is currently unavailable. Please try again later.",
+        errorCode: "AI_UNAVAILABLE"
+      });
+      return;
+    }
+    
     // Check for cached response
-    sendProgressUpdate(socket, "decision", "Checking if I've answered this question before...");
-    const cachedResponse = await AIIntegrationService.getCachedQueryResponse(userId, task);
-    if (cachedResponse && !data.refresh) {
-      aiQueryLogger.info(`Using cached response for WebSocket task: ${task.substring(0, 50)}...`);
+    if (!refresh) {
+      sendProgressUpdate(socket, "decision", "Checking if I've answered this question before...");
+      const cachedResponse = await AIIntegrationService.getCachedQueryResponse(userId, task);
       
-      // Set database as current context
-      await ContextService.setCurrentDatabaseContext(userId, targetDbId);
-      
-      // Execute query if needed
-      if (cachedResponse.query && !cachedResponse.results) {
-        const queryResult = await QueryService.executeQuery(userId, {
-          dbId: targetDbId,
-          query: cachedResponse.query
-        });
+      if (cachedResponse) {
+        aiQueryLogger.info(`Using cached response for WebSocket task: ${task.substring(0, 50)}...`);
+        
+        // Set database as current context
+        await ContextService.setCurrentDatabaseContext(userId, targetDbId);
+        
+        // Execute query if needed
+        if (cachedResponse.query && !cachedResponse.results) {
+          sendProgressUpdate(socket, "query_execution", "Executing cached query...", {
+            query: cachedResponse.query
+          });
+          
+          // Execute the query
+          const queryResult = await QueryService.executeQuery(userId, {
+            dbId: targetDbId,
+            query: cachedResponse.query
+          });
+          
+          sendProgressUpdate(socket, "result_analysis", "Analysis complete (from cache)");
+          
+          sendMessage(socket, {
+            type: "queryResult",
+            data: {
+              query: cachedResponse.query,
+              explanation: cachedResponse.explanation,
+              results: queryResult.rows || [],
+              visualizationCode: cachedResponse.visualizationCode,
+              executionTimeMs: queryResult.executionTimeMs || 0,
+              rowCount: queryResult.rowCount || 0,
+              dbId: targetDbId,
+              dbName: database.database_name || "database",
+              cached: true
+            }
+          });
+          return;
+        }
+        
+        // Fix for destructuring to avoid duplicate property
+        const { success, ...restOfResponse } = cachedResponse;
+        
+        sendProgressUpdate(socket, "result_analysis", "Analysis complete (from cache)");
         
         sendMessage(socket, {
           type: "queryResult",
           data: {
-            query: cachedResponse.query,
-            explanation: cachedResponse.explanation,
-            results: queryResult.rows || [],
-            visualizationCode: cachedResponse.visualizationCode,
-            executionTimeMs: queryResult.executionTimeMs || 0,
-            rowCount: queryResult.rowCount || 0,
+            ...restOfResponse,
             dbId: targetDbId,
             dbName: database.database_name || "database",
             cached: true
@@ -279,19 +379,6 @@ export async function processWebSocketQuery(socket: ws.WebSocket, userId: number
         });
         return;
       }
-      
-      // Fix for destructuring to avoid duplicate property
-      const { success, ...restOfResponse } = cachedResponse;
-      sendMessage(socket, {
-        type: "queryResult",
-        data: {
-          ...restOfResponse,
-          dbId: targetDbId,
-          dbName: database.database_name || "database",
-          cached: true
-        }
-      });
-      return;
     }
     
     // Process with AI
@@ -308,7 +395,7 @@ export async function processWebSocketQuery(socket: ws.WebSocket, userId: number
       dbType: database.db_type,
       dbName: database.database_name || "",
       task,
-      options: { visualize }
+      options: { visualize, refresh }
     };
     
     // Short delay to show progress to the user
@@ -316,12 +403,14 @@ export async function processWebSocketQuery(socket: ws.WebSocket, userId: number
     
     sendProgressUpdate(socket, "query_generation", "Generating SQL query...");
     
-    const aiResponse = await AIIntegrationService.processQuery(aiRequest);
+    // Get AI response
+    const processedResponse = await AIIntegrationService.processQuery(aiRequest);
     
-    if (!aiResponse.success) {
+    if (!processedResponse.success) {
       sendMessage(socket, {
         type: "error",
-        message: aiResponse.error || "AI failed to process the query"
+        message: processedResponse.error || "AI failed to process the query",
+        errorCode: "AI_PROCESSING_FAILED"
       });
       return;
     }
@@ -330,14 +419,15 @@ export async function processWebSocketQuery(socket: ws.WebSocket, userId: number
     await ContextService.setCurrentDatabaseContext(userId, targetDbId);
     
     // Execute query if needed
-    if (aiResponse.query && !aiResponse.results) {
+    if (processedResponse.query && !processedResponse.results) {
       sendProgressUpdate(socket, "query_execution", "Executing query...", {
-        query: aiResponse.query
+        query: processedResponse.query
       });
       
+      // Execute the query
       const queryResult = await QueryService.executeQuery(userId, {
         dbId: targetDbId,
-        query: aiResponse.query
+        query: processedResponse.query
       });
       
       sendProgressUpdate(socket, "result_analysis", "Analyzing results...");
@@ -350,10 +440,10 @@ export async function processWebSocketQuery(socket: ws.WebSocket, userId: number
       sendMessage(socket, {
         type: "queryResult",
         data: {
-          query: aiResponse.query,
-          explanation: aiResponse.explanation,
+          query: processedResponse.query,
+          explanation: processedResponse.explanation,
           results: queryResult.rows || [],
-          visualizationCode: aiResponse.visualizationCode,
+          visualizationCode: processedResponse.visualizationCode,
           executionTimeMs: queryResult.executionTimeMs || 0,
           rowCount: queryResult.rowCount || 0,
           dbId: targetDbId,
@@ -362,7 +452,7 @@ export async function processWebSocketQuery(socket: ws.WebSocket, userId: number
       });
     } else {
       // Fix for destructuring to avoid duplicate property
-      const { success, ...restOfResponse } = aiResponse;
+      const { success, ...restOfResponse } = processedResponse;
       // Return AI response directly
       sendMessage(socket, {
         type: "queryResult",
@@ -375,11 +465,37 @@ export async function processWebSocketQuery(socket: ws.WebSocket, userId: number
     }
   } catch (error) {
     aiQueryLogger.error(`WebSocket query error: ${(error as Error).message}`);
-    sendMessage(socket, {
-      type: "error",
-      message: "Failed to process query",
-      error: (error as Error).message
-    });
+    
+    // Improved error reporting with specific error types
+    if ((error as Error).message.includes("AI agent endpoint not found")) {
+      sendMessage(socket, {
+        type: "error",
+        message: "AI service connection issue. Please try again later or contact support.",
+        error: "Configuration error: AI service not available",
+        errorCode: "AI_ENDPOINT_MISSING"
+      });
+    } else if ((error as Error).message.includes("timeout")) {
+      sendMessage(socket, {
+        type: "error",
+        message: "AI service is taking too long to respond. Please try a simpler query.",
+        error: "Request timed out",
+        errorCode: "AI_TIMEOUT"
+      });
+    } else if ((error as Error).message.includes("connection refused")) {
+      sendMessage(socket, {
+        type: "error",
+        message: "Cannot connect to AI service. Please try again later.",
+        error: "Connection refused",
+        errorCode: "AI_CONNECTION_REFUSED"
+      });
+    } else {
+      sendMessage(socket, {
+        type: "error",
+        message: "Failed to process query",
+        error: (error as Error).message,
+        errorCode: "GENERAL_ERROR"
+      });
+    }
   }
 }
 

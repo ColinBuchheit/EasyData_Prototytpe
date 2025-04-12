@@ -30,6 +30,31 @@ const wss = new WebSocketServer({ server });
 initializeWebSocketHandlers(wss);
 
 /**
+ * Run AI Agent connection check
+ */
+async function checkAIAgentConnection() {
+  serverLogger.info('🤖 Testing AI Agent connection...');
+  
+  try {
+    const { AIIntegrationService } = await import('./modules/ai/services/ai-integration.service');
+    const { ENV } = await import('./config/env');
+    
+    serverLogger.info(`🔌 Connecting to AI Agent at ${ENV.AI_AGENT_API}...`);
+    
+    const isHealthy = await AIIntegrationService.checkHealth();
+    
+    if (isHealthy) {
+      serverLogger.info('✅ AI Agent connection successful');
+    } else {
+      serverLogger.warn('⚠️ AI Agent health check failed. AI functionality may not work correctly.');
+    }
+  } catch (error) {
+    serverLogger.error(`❌ AI Agent connection test failed: ${(error as Error).message}`);
+    serverLogger.warn('⚠️ AI functionality will be limited or unavailable');
+  }
+}
+
+/**
  * Run startup diagnostics
  */
 async function runStartupDiagnostics() {
@@ -55,27 +80,8 @@ async function runStartupDiagnostics() {
     serverLogger.error(`❌ Redis test failed: ${(error as Error).message}`);
   }
   
-  // Test AI Agent
-  try {
-    const axios = require('axios');
-    const AI_AGENT_URL = process.env.AI_AGENT_API || 'http://localhost:5001';
-    const AI_API_KEY = process.env.AI_API_KEY || '';
-    
-    serverLogger.info(`Testing AI Agent connection to ${AI_AGENT_URL}...`);
-    
-    const response = await axios.get(`${AI_AGENT_URL}/api/v1/health`, {
-      timeout: 5000,
-      headers: { 'Authorization': `Bearer ${AI_API_KEY}` }
-    });
-    
-    if (response.data && response.data.status === 'ok') {
-      serverLogger.info('✅ AI Agent connection successful');
-    } else {
-      serverLogger.warn(`⚠️ AI Agent returned unexpected response: ${JSON.stringify(response.data)}`);
-    }
-  } catch (error) {
-    serverLogger.error(`❌ AI Agent test failed: ${(error as Error).message}`);
-  }
+  // Test AI Agent - use dedicated function
+  await checkAIAgentConnection();
   
   serverLogger.info('🔍 Startup diagnostics complete');
 }
