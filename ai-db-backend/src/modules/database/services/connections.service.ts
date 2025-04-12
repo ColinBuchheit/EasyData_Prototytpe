@@ -18,6 +18,12 @@ export class ConnectionsService {
    */
   static async createConnection(userId: number, config: DatabaseConnectionConfig): Promise<UserDatabase> {
     try {
+      // Validate that userId is a valid integer
+      if (!Number.isInteger(userId)) {
+        connectionsLogger.error(`Invalid parameters to createConnection: userId=${userId}`);
+        throw new Error(`Invalid user ID parameter: userID=${userId}`);
+      }
+      
       const encryptedPassword = encrypt(config.password);
       
       const result = await pool.query(
@@ -41,7 +47,7 @@ export class ConnectionsService {
       connectionsLogger.info(`New database connection added for User ${userId}`);
       return result.rows[0];
     } catch (error) {
-      connectionsLogger.error(`Failed to encrypt database password: ${(error as Error).message}`);
+      connectionsLogger.error(`Failed to create database connection: ${(error as Error).message}`);
       throw new Error("Failed to securely store database credentials");
     }
   }
@@ -69,6 +75,12 @@ export class ConnectionsService {
    */
   static async getConnectionById(userId: number, dbId: number): Promise<UserDatabase | null> {
     try {
+      // Validate that both userId and dbId are valid integers
+      if (!Number.isInteger(userId) || !Number.isInteger(dbId)) {
+        connectionsLogger.error(`Invalid input: userId=${userId}, dbId=${dbId}`);
+        throw new Error(`Invalid database connection ID parameters: userID=${userId}, dbID=${dbId}`);
+      }
+
       const result = await pool.query(
         `SELECT id, user_id, connection_name, db_type, host, port, username, encrypted_password, database_name, 
         is_connected, created_at, updated_at 
@@ -88,6 +100,12 @@ export class ConnectionsService {
    * Helper method to get database with decrypted password for client operations
    */
   static async getConnectionWithDecryptedPassword(userId: number, dbId: number): Promise<UserDatabase | null> {
+    // Validate that both userId and dbId are valid integers
+    if (!Number.isInteger(userId) || !Number.isInteger(dbId)) {
+      connectionsLogger.error(`Invalid parameters to getConnectionWithDecryptedPassword: userId=${userId}, dbId=${dbId}`);
+      throw new Error(`Invalid database connection ID parameters: userID=${userId}, dbID=${dbId}`);
+    }
+
     const db = await this.getConnectionById(userId, dbId);
     
     if (!db) {
@@ -181,6 +199,12 @@ export class ConnectionsService {
     data: Partial<DatabaseConnectionConfig>
   ): Promise<UserDatabase | null> {
     try {
+      // Validate that both userId and dbId are valid integers
+      if (!Number.isInteger(userId) || !Number.isInteger(dbId)) {
+        connectionsLogger.error(`Invalid parameters to updateConnection: userId=${userId}, dbId=${dbId}`);
+        throw new Error(`Invalid database connection ID parameters: userID=${userId}, dbID=${dbId}`);
+      }
+
       const fields = [];
       const values: any[] = [];
 
@@ -240,6 +264,12 @@ export class ConnectionsService {
    */
   static async deleteConnection(userId: number, dbId: number): Promise<boolean> {
     try {
+      // Validate that both userId and dbId are valid integers
+      if (!Number.isInteger(userId) || !Number.isInteger(dbId)) {
+        connectionsLogger.error(`Invalid parameters to deleteConnection: userId=${userId}, dbId=${dbId}`);
+        throw new Error(`Invalid database connection ID parameters: userID=${userId}, dbID=${dbId}`);
+      }
+
       const result = await pool.query(
         "DELETE FROM user_databases WHERE id = $1 AND user_id = $2 RETURNING id",
         [dbId, userId]
@@ -263,6 +293,12 @@ export class ConnectionsService {
    */
   static async testConnection(userId: number, config: DatabaseConnectionConfig): Promise<{ success: boolean; message: string }> {
     try {
+      // Validate that userId is a valid integer
+      if (!Number.isInteger(userId)) {
+        connectionsLogger.error(`Invalid parameters to testConnection: userId=${userId}`);
+        return { success: false, message: `Invalid user ID parameter: userID=${userId}` };
+      }
+      
       // Create a temporary database object
       const tempDb: UserDatabase = {
         id: -1,

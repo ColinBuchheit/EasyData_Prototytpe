@@ -15,7 +15,15 @@ export const hashPassword = async (password: string): Promise<string> => {
  * Compare a password with a hash
  */
 export const comparePassword = async (password: string, hashedPassword: string): Promise<boolean> => {
-  return await bcrypt.compare(password, hashedPassword);
+  console.log(`[AUTH DEBUG] Password comparison - Input password length: ${password.length}, Hash length: ${hashedPassword ? hashedPassword.length : 'null'}`);
+  try {
+    const result = await bcrypt.compare(password, hashedPassword);
+    console.log(`[AUTH DEBUG] bcrypt.compare result: ${result}`);
+    return result;
+  } catch (error) {
+    console.log(`[AUTH DEBUG] bcrypt.compare error: ${(error as Error).message}`);
+    return false;
+  }
 };
 
 /**

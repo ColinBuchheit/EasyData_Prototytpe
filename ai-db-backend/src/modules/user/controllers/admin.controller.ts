@@ -6,7 +6,7 @@ import { AuthRequest } from "../../../modules/auth/middleware/verification.middl
 import { asyncHandler } from "../../../shared/utils/errorHandler";
 import { ProfileService } from "../services/profile.service";
 import { UserService } from "../services/user.service";
-import { UserCreationData, UserListOptions, UserRole, UserStatus } from "../models/user.model";
+import { UserCreationData, UserListOptions, UserRole, UserStatus } from "../model/user.model";
 
 const adminLogger = createContextLogger("AdminController");
 

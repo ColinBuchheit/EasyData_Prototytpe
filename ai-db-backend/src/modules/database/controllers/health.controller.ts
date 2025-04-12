@@ -17,10 +17,21 @@ export const checkConnectionHealth = asyncHandler(async (req: AuthRequest, res: 
     return res.status(401).json({ success: false, message: "Unauthorized: User not authenticated" });
   }
 
-  const dbId = Number(req.params.id);
-
-  if (isNaN(dbId)) {
-    return res.status(400).json({ success: false, message: "Invalid database ID." });
+  // Better parsing of the database ID parameter
+  let dbId: number;
+  try {
+    // Ensure we're dealing with a string that contains only digits
+    if (typeof req.params.id !== 'string' || !/^\d+$/.test(req.params.id)) {
+      return res.status(400).json({ success: false, message: "Invalid database ID format." });
+    }
+    
+    dbId = parseInt(req.params.id, 10);
+    
+    if (isNaN(dbId) || !Number.isInteger(dbId) || dbId <= 0) {
+      return res.status(400).json({ success: false, message: "Invalid database ID." });
+    }
+  } catch (error) {
+    return res.status(400).json({ success: false, message: "Error parsing database ID." });
   }
 
   // Get the database connection

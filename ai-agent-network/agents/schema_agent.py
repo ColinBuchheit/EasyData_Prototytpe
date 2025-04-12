@@ -1,4 +1,4 @@
-# Update: agents/schema_agent.py
+# agents/schema_agent.py
 
 from agents.base_agent import BaseAgent
 from db_adapters.base_db_adapters import UserDatabase, BaseDBAdapter
@@ -9,78 +9,89 @@ import json
 from utils.settings import OPENAI_API_KEY, SCHEMA_ANALYSIS_MODEL
 from utils.logger import logger
 from utils.error_handling import handle_agent_error, ErrorSeverity, create_database_error, create_ai_service_error
+from utils.backend_bridge import fetch_schema_for_user_db
 
 class SchemaAgent(BaseAgent):
     """
     Enhanced SchemaAgent that:
-    1. Fetches and formats table + column metadata from the connected user DB
+    1. Fetches and formats table + column metadata from the backend (not direct DB connection)
     2. Analyzes schema to understand database content and purpose
     3. Helps select the most appropriate database for a given query
+    4. Detects general conversation vs actual database queries
     """
 
     def run(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         # Check which operation to perform
         operation = input_data.get("operation", "fetch_schema")
         
+        # Check if this is a general conversation query before doing any operation
+        task = input_data.get("task", "")
+        if self._is_general_conversation(task):
+            return {
+                "success": True,
+                "is_general_conversation": True,
+                "message": "This appears to be a general conversation message, not a database query."
+            }
+        
         if operation == "analyze_schema":
             return self._analyze_schema(input_data)
         elif operation == "match_database":
             return self._match_database_for_query(input_data)
         else:
-            # Default to original schema fetching functionality
+            # Default to schema fetching functionality
             return self._fetch_schema(input_data)
 
     def _fetch_schema(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         try:
-            db: UserDatabase = input_data["db"]
-            adapter: BaseDBAdapter = input_data["adapter"]
-
-            logger.info(f"🔍 SchemaAgent fetching tables for user DB: {db.db_type}")
-
-            tables = adapter.fetch_tables(db)
-            if not tables:
-                logger.warning("⚠️ No tables found in user DB.")
+            # Get necessary info to fetch schema from backend
+            user_id = input_data.get("user_id", "")
+            db_info = input_data.get("db_info", {})
+            
+            if not user_id or not db_info:
+                logger.warning("⚠️ Missing user_id or db_info for schema fetch")
                 return handle_agent_error(
                     self.name(),
-                    ValueError("No tables found in database."),
+                    ValueError("Missing required parameters: user_id or db_info"),
                     ErrorSeverity.MEDIUM
                 )
-
-            schema = {}
-            for table in tables:
-                try:
-                    raw_columns = adapter.fetch_schema(db, table)
-                    parsed_columns = self._parse_columns(raw_columns, db.db_type)
-                    schema[table] = parsed_columns
-                except Exception as table_error:
-                    logger.warning(f"⚠️ Failed to fetch schema for table {table}: {table_error}")
-                    schema[table] = []
-
-            logger.info(f"✅ SchemaAgent completed. Tables: {tables}")
-
+            
+            logger.info(f"🔍 SchemaAgent fetching schema from backend for user {user_id}")
+            
+            # Use backend bridge to fetch schema instead of direct DB connection
+            schema_response = fetch_schema_for_user_db(db_info, user_id)
+            
+            if not schema_response.get("success", False):
+                error_msg = schema_response.get("error", "Unknown error fetching schema")
+                logger.warning(f"⚠️ Failed to fetch schema from backend: {error_msg}")
+                return handle_agent_error(
+                    self.name(),
+                    ValueError(f"Failed to fetch schema: {error_msg}"),
+                    ErrorSeverity.MEDIUM
+                )
+            
+            # Extract schema from response
+            schema = schema_response.get("schema", {})
+            
+            # If schema is empty, return error
+            if not schema or not schema.get("tables", []):
+                logger.warning("⚠️ No tables found in schema from backend")
+                return handle_agent_error(
+                    self.name(),
+                    ValueError("No tables found in database schema."),
+                    ErrorSeverity.MEDIUM
+                )
+            
+            logger.info(f"✅ SchemaAgent completed. Tables: {schema.get('tables', [])}")
+            
+            # Return the schema
             return {
                 "success": True,
-                "schema": {
-                    "tables": tables,
-                    "columns": schema,
-                    "db_type": db.db_type
-                }
+                "schema": schema
             }
 
         except Exception as e:
             logger.exception("❌ SchemaAgent encountered a fatal error.")
-            # Since this is directly related to database operations, we use a specialized handler
-            if "db" in input_data and hasattr(input_data["db"], 'db_type'):
-                return create_database_error(
-                    message=f"Failed to fetch schema: {str(e)}",
-                    db_type=input_data["db"].db_type,
-                    operation="schema_fetch",
-                    source=self.name(),
-                    severity=ErrorSeverity.HIGH,
-                    original_error=e
-                ).to_dict()
-            else:
-                return handle_agent_error(self.name(), e, ErrorSeverity.HIGH)
+            return handle_agent_error(self.name(), e, ErrorSeverity.HIGH)
 
     def _analyze_schema(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         try:
@@ -353,3 +364,41 @@ Return your analysis as a JSON object with exactly this structure:
 
 The selectedDbId must be one of the database IDs listed above. The confidence should be between 0 and 1.
 """
+
+    def _is_general_conversation(self, task: str) -> bool:
+        """Detect if this is a general conversation rather than a database query"""
+        if not task:
+            return False
+            
+        task = task.lower().strip()
+        
+        # Common conversation starters
+        greetings = ["hi", "hello", "hey", "greetings", "howdy", "what's up", "hi there"]
+        general_questions = [
+            "what can you do", 
+            "how does this work", 
+            "who are you",
+            "what are you",
+            "help me",
+            "what is this"
+        ]
+        
+        # Check for exact matches with greetings
+        if task in greetings:
+            return True
+            
+        # Check for general questions
+        for question in general_questions:
+            if question in task:
+                return True
+                
+        # If task is very short (less than 4 words) and doesn't contain 
+        # database terms, likely conversation
+        if len(task.split()) < 4:
+            db_terms = ["select", "query", "database", "table", "data", "show", "find", "get", "list"]
+            has_db_term = any(term in task for term in db_terms)
+            
+            if not has_db_term:
+                return True
+            
+        return False

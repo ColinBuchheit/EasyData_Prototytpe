@@ -2,7 +2,7 @@
 
 import { pool } from "../../../config/db";
 import { createContextLogger } from "../../../config/logger";
-import { ProfileUpdateData, UserProfile } from "../models/profile.model";
+import { ProfileUpdateData, UserProfile } from "../model/profile.model";
 import { UserService } from "./user.service";
 
 const profileLogger = createContextLogger("ProfileService");
@@ -256,7 +256,7 @@ export class ProfileService {
       );
       
       profileLogger.info(`Deleted profile for user ${userId}`);
-      return result.rowCount > 0;
+      return result.rowCount !== null && result.rowCount > 0;
     } catch (error) {
       profileLogger.error(`Error deleting profile for user ${userId}: ${(error as Error).message}`);
       throw error;

@@ -18,6 +18,12 @@ export class DatabaseHealthServiceImpl {
    */
   static async getCachedHealthStatus(dbId: number): Promise<any | null> {
     try {
+      // Validate that dbId is a valid integer
+      if (!Number.isInteger(dbId)) {
+        healthLogger.error(`Invalid database ID parameter in getCachedHealthStatus: dbId=${dbId}`);
+        return null;
+      }
+      
       const redisClient = await getRedisClient();
       const cachedStatus = await redisClient.get(`db:health:${dbId}`);
       
@@ -106,6 +112,12 @@ export class DatabaseHealthServiceImpl {
    */
   private static async storeHealthStatus(dbId: number, result: HealthCheckResult): Promise<void> {
     try {
+      // Validate that dbId is a valid integer
+      if (!Number.isInteger(dbId)) {
+        healthLogger.error(`Invalid database ID parameter in storeHealthStatus: dbId=${dbId}`);
+        return;
+      }
+      
       const redisClient = await getRedisClient();
       
       const status = {

@@ -1,4 +1,5 @@
 // src/config/env.ts
+
 import path from "path";
 import basicLogger from "./basiclogger";
 
@@ -107,9 +108,9 @@ export const ENV: EnvConfig = {
   // Redis
   REDIS_URL: getEnvVar("REDIS_URL", "redis://localhost:6379", false),
   
-  // External APIs
-  AI_AGENT_API: getEnvVar("AI_AGENT_API", "http://localhost:5001", false),
-  AI_API_KEY: getEnvVar("AI_API_KEY", "", false),
+  // External APIs - Updated AI_AGENT_API to support multiple runtime environments
+  AI_AGENT_API: getEnvVar("AI_AGENT_API", process.env.NODE_ENV === "production" ? "http://ai-agent-network:5001" : "http://localhost:5001", false),
+  AI_API_KEY: getEnvVar("AI_API_KEY", "default-dev-key-change-in-production", false),
   BACKEND_SECRET: getEnvVar("BACKEND_SECRET", "backend-secret-change-in-production"),
   
   // CORS & Security

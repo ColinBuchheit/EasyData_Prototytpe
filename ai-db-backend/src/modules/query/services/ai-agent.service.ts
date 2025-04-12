@@ -20,9 +20,19 @@ export class AIAgentService {
     try {
       aiLogger.info(`Processing NL query for database ${request.dbId}: ${request.task}`);
       
+      // Create proper db_info object as expected by the AI agent
       const response = await axios.post(
-        `${AI_AGENT_URL}/process-query`,
-        request,
+        `${AI_AGENT_URL}/api/v1/run`,
+        {
+          task: request.task,
+          user_id: request.userId.toString(),
+          db_info: {
+            id: request.dbId,
+            db_type: request.dbType,
+            database_name: request.dbName
+          },
+          visualize: request.options?.visualize ?? true
+        },
         {
           headers: {
             'Content-Type': 'application/json',
@@ -40,7 +50,14 @@ export class AIAgentService {
         };
       }
       
-      return response.data;
+      // Transform AI agent response to structured format
+      return {
+        success: true,
+        query: response.data.final_output?.query || "",
+        explanation: response.data.final_output?.text || "",
+        visualizationCode: response.data.final_output?.visualization?.chart_code || "",
+        agentsCalled: response.data.agents_called || []
+      };
     } catch (error) {
       if (axios.isAxiosError(error) && error.code === 'ECONNABORTED') {
         aiLogger.error(`AI agent request timed out after ${REQUEST_TIMEOUT / 1000} seconds`);
@@ -65,8 +82,20 @@ export class AIAgentService {
     try {
       aiLogger.info(`Running AI orchestration: ${input.operation || 'default'}`);
       
+      // Ensure db_info is properly formatted if present
+      if (input.db_info && typeof input.db_info === 'number') {
+        // If db_info is just an ID, we need to fetch the full info
+        // This is a fallback for backward compatibility
+        aiLogger.warn("Converting numeric db_info to proper object format");
+        input.db_info = {
+          id: input.db_info,
+          db_type: input.db_type || "unknown",
+          database_name: input.db_name || "database"
+        };
+      }
+      
       const response = await axios.post(
-        `${AI_AGENT_URL}/run`, 
+        `${AI_AGENT_URL}/api/v1/run`, 
         input,
         {
           headers: {
@@ -103,7 +132,7 @@ export class AIAgentService {
       aiLogger.info(`Generating visualization for task: ${task}`);
       
       const response = await axios.post(
-        `${AI_AGENT_URL}/visualize`,
+        `${AI_AGENT_URL}/api/v1/visualize`,
         { data, task },
         { 
           headers: {
@@ -132,7 +161,7 @@ export class AIAgentService {
   static async checkHealth(): Promise<boolean> {
     try {
       const response = await axios.get(
-        `${AI_AGENT_URL}/health`,
+        `${AI_AGENT_URL}/api/v1/health`,
         { 
           timeout: 5000,
           headers: { 'Authorization': `Bearer ${AI_API_KEY}` }
@@ -146,5 +175,3 @@ export class AIAgentService {
     }
   }
 }
-
-export default AIAgentService;

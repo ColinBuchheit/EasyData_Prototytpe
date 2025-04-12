@@ -32,6 +32,8 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
 
   // Hash password before saving
   const hashedPassword = await hashPassword(password);
+  console.log(`[AUTH DEBUG] Registration - Original password length: ${password.length}, Hash length: ${hashedPassword.length}`);
+  
   const newUser = await UserService.createUser({
     username,
     email,
@@ -66,6 +68,31 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
       username: newUser.username,
       email: newUser.email,
       role: newUser.role
+    }
+  });
+});
+
+// This should be in your auth controller on the backend
+export const verifyToken = asyncHandler(async (req: AuthRequest, res: Response) => {
+  if (!req.user) {
+    return res.status(401).json({ success: false, message: "Unauthorized: User not authenticated" });
+  }
+
+  // Get full user data (omitting sensitive information)
+  const user = await UserService.getUserById(req.user.id);
+  
+  if (!user) {
+    return res.status(404).json({ success: false, message: "User not found" });
+  }
+  
+  res.json({
+    success: true,
+    user: {
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      role: user.role,
+      status: user.status
     }
   });
 });

@@ -1,7 +1,7 @@
-from fastapi import FastAPI, Request, Depends
+from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import Dict, Any, Optional
+from pydantic import BaseModel, Field
+from typing import Dict, Any, Optional, List, Union
 
 from crew import run_crew_pipeline
 from utils.redis_client import get_redis_client
@@ -23,11 +23,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# === Request Schema
+# === Request Schema with stricter validation
+class DbInfo(BaseModel):
+    id: int
+    db_type: str
+    database_name: str
+    schema: Optional[Dict[str, Any]] = None
+    
 class CrewRequest(BaseModel):
     task: str
     user_id: str
-    db_info: Dict[str, Any]
+    db_info: DbInfo
     visualize: bool = True
 
 class DatabaseConnectionRequest(BaseModel):
@@ -39,16 +45,27 @@ class DatabaseConnectionRequest(BaseModel):
 async def run_pipeline(payload: CrewRequest):
     try:
         logger.info(f"📥 Received pipeline request for user {payload.user_id}")
+        
+        # Log the request for debugging
+        logger.debug(f"Request payload: {payload.dict()}")
+        
+        # Convert pydantic model to dict for run_crew_pipeline
+        db_info_dict = payload.db_info.dict()
+        
         result = run_crew_pipeline(
             task=payload.task,
             user_id=payload.user_id,
-            db_info=payload.db_info,
+            db_info=db_info_dict,
             visualize=payload.visualize
         )
         return result
     except Exception as e:
         logger.exception("❌ Failed to run pipeline")
-        return {"success": False, "error": str(e)}
+        # Provide more detailed error information
+        raise HTTPException(
+            status_code=500,
+            detail=f"Pipeline execution failed: {str(e)}"
+        )
 
 
 # === Redis Health Check
@@ -88,8 +105,6 @@ async def service_health():
         redis_status = "error"
         redis_message = str(e)
     
-    # You could add more service checks here
-    
     return {
         "status": "ok" if redis_status == "ok" else "degraded",
         "version": "1.0.0",
@@ -110,3 +125,10 @@ async def service_health():
 @app.get("/")
 async def root():
     return {"status": "ok", "message": "AI-Agent-Network is running", "version": "1.0.0"}
+
+
+# === Entrypoint for local development
+if __name__ == "__main__":
+    import uvicorn
+    print("🚀 Starting AI Agent Network on http://0.0.0.0:8000")
+    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
