@@ -15,7 +15,7 @@ from db_adapters.db_adapter_router import get_adapter_for_db
 from db_adapters.base_db_adapters import UserDatabase
 
 from utils.context_manager import get_context, set_context, append_to_context
-from utils.backend_bridge import fetch_query_result
+from utils.backend_bridge import fetch_query_result, fetch_schema_for_user_db
 from utils.logger import logger
 from utils.error_handling import handle_agent_error, ErrorSeverity
 
@@ -59,8 +59,8 @@ crew_visualization_agent = CrewAIAgentAdapter.create_crew_agent(
 
 crew_chat_agent = CrewAIAgentAdapter.create_crew_agent(
     chat_agent_impl,
-    role="Narrative Generator",
-    goal="Explain the results to the user in a clear, friendly format.",
+    role="Intent Classifier and Conversation Manager",
+    goal="Determine user intent and manage conversations or explain query results.",
     name="Chat Agent"
 )
 
@@ -78,48 +78,67 @@ def execute_db_query(query: str, db_info: Dict[str, Any], user_id: str) -> Dict[
 # === Main Orchestration Function ===
 def run_crew_pipeline(task: str, user_id: str, db_info: Dict[str, Any], visualize: bool = True) -> Dict[str, Any]:
     try:
-        db = UserDatabase(**db_info)
-        adapter = get_adapter_for_db(db.db_type)
-
         context = get_context(user_id) or {}
         logger.info(f"📦 Loaded context for user {user_id}: {len(context.keys())} keys")
 
-        # First, run the schema task to see if it's a general conversation
-        schema_task = Task(
-            identifier="schema_task",
-            description="Extract and organize the database schema",
-            agent=crew_schema_agent,
-            expected_output="Complete database schema information",
+        # First, detect intent with Chat Agent
+        chat_task = Task(
+            identifier="intent_detection_task",
+            description=f"Determine if this is a conversation or database query: {task}",
+            agent=crew_chat_agent,
+            expected_output="Classification of user intent",
             context=[{
-                "description": "Database connection and adapter used for schema extraction",
-                "expected_output": "Structured representation of database schema (tables, columns, types)",
-                "db": db,
-                "adapter": adapter,
-                "db_info": db_info,
-                "user_id": user_id,
-                "task": task  # Pass the task to help detect general conversation
+                "description": "Classify user intent",
+                "expected_output": "JSON with intent classification",
+                "task": task,
+                "operation": "classify_intent"  # Special flag for Chat Agent
             }]
         )
-
-        # Execute just the schema task first
-        schema_crew = Crew(
-            agents=[crew_schema_agent],
-            tasks=[schema_task],
+        
+        # Run the intent classification
+        intent_crew = Crew(
+            agents=[crew_chat_agent],
+            tasks=[chat_task],
             verbose=True,
             process="sequential"
         )
         
-        schema_result = schema_crew.kickoff()
-        schema_output = getattr(schema_result, "schema_task", {})
+        intent_result = intent_crew.kickoff()
+        intent_output = getattr(intent_result, "intent_detection_task", {})
         
-        # Check if this is a general conversation
-        if isinstance(schema_output, dict) and schema_output.get("is_general_conversation", False):
-            logger.info(f"🗣️ Detected general conversation for task: {task}")
-            
-            # Process with chat agent instead
-            chat_task = Task(
-                identifier="chat_task",
-                description=f"Respond to general conversation: {task}",
+        logger.debug(f"Intent detection result: {intent_output}")
+        
+        # Check intent classification result
+        intent_type = "unknown"
+        confidence = 0
+        
+        if isinstance(intent_output, dict):
+            intent_type = intent_output.get("intent_type", "unknown")
+            confidence = intent_output.get("confidence", 0)
+        elif isinstance(intent_output, str):
+            # Try to parse if it's a string containing JSON
+            try:
+                parsed_intent = json.loads(intent_output)
+                intent_type = parsed_intent.get("intent_type", "unknown")
+                confidence = parsed_intent.get("confidence", 0)
+            except:
+                # Look for specific keywords in the text response
+                intent_output_lower = intent_output.lower()
+                if "conversation" in intent_output_lower or "greeting" in intent_output_lower:
+                    intent_type = "conversation"
+                    confidence = 0.8
+                elif "query" in intent_output_lower or "database" in intent_output_lower:
+                    intent_type = "query"
+                    confidence = 0.8
+        
+        logger.info(f"Detected intent: {intent_type} (confidence: {confidence})")
+        
+        # If it's conversational or the intent is unknown/unparseable, handle as conversation
+        if intent_type == "conversation" or intent_type == "unknown":
+            # Handle as conversation
+            chat_response_task = Task(
+                identifier="chat_response_task",
+                description=f"Respond to conversation: {task}",
                 agent=crew_chat_agent,
                 expected_output="Friendly conversation response",
                 context=[{
@@ -132,27 +151,88 @@ def run_crew_pipeline(task: str, user_id: str, db_info: Dict[str, Any], visualiz
             
             chat_crew = Crew(
                 agents=[crew_chat_agent],
-                tasks=[chat_task],
+                tasks=[chat_response_task],
                 verbose=True,
                 process="sequential"
             )
             
             chat_result = chat_crew.kickoff()
-            chat_output = getattr(chat_result, "chat_task", "")
+            chat_output = getattr(chat_result, "chat_response_task", "")
+            
+            # Properly extract the response message from whatever format we received
+            response_text = ""
+            if isinstance(chat_output, str):
+                response_text = chat_output
+            elif isinstance(chat_output, dict):
+                response_text = chat_output.get("message", "")
+            
+            # If response_text is still empty, look for other possible keys
+            if not response_text and isinstance(chat_output, dict):
+                for key in ["response", "text", "answer", "content"]:
+                    if key in chat_output and chat_output[key]:
+                        response_text = chat_output[key]
+                        break
+            
+            # If still empty, provide a default response
+            if not response_text:
+                response_text = "I'm here to help with your database queries or chat with you. What would you like to do?"
             
             return {
                 "success": True,
                 "final_output": {
-                    "text": chat_output,
+                    "text": response_text,
                     "is_general_conversation": True
                 },
-                "agents_called": ["schema_agent", "chat_agent"]
+                "agents_called": ["chat_agent"]
             }
-
-        # Continue with regular DB query pipeline if not a general conversation
+        elif intent_type == "ambiguous":
+            # Ask for clarification
+            return {
+                "success": True,
+                "final_output": {
+                    "text": "I'm not sure if you're asking about database information or just chatting. Could you clarify your question?",
+                    "is_general_conversation": True,
+                    "requires_clarification": True
+                },
+                "agents_called": ["chat_agent"]
+            }
+        
+        # Only proceed with database operations for "query" intent
+        # Make a copy of db_info without the schema field to avoid errors
+        db_info_copy = {k: v for k, v in db_info.items() if k != 'schema'}
+        
+        # Now use the backend bridge to fetch the actual schema - never make it up
+        logger.info(f"🔍 Fetching real schema from backend for user {user_id}")
+        
+        schema_result = fetch_schema_for_user_db(db_info, user_id)
+        
+        if not schema_result.get("success", False):
+            logger.error(f"❌ Failed to fetch schema from backend: {schema_result.get('error')}")
+            return {
+                "success": False,
+                "error": f"Could not retrieve database schema: {schema_result.get('error')}",
+                "agents_called": ["chat_agent"]
+            }
+        
+        # Extract real schema from response
+        schema_output = schema_result.get("schema", {})
+        
+        # If schema is empty or no tables, return error
+        if not schema_output or not schema_output.get("tables", []):
+            logger.warning("⚠️ No tables found in schema from backend")
+            return {
+                "success": False,
+                "error": "No tables found in database schema.",
+                "agents_called": ["chat_agent"]
+            }
+        
+        # Now create the UserDatabase instance with the sanitized db_info
+        db = UserDatabase(**db_info_copy)
+        adapter = get_adapter_for_db(db.db_type)
+        
         append_to_context(user_id, {"schema": schema_output})
 
-        # Now proceed with query generation
+        # Proceed with query generation
         query_task = Task(
             identifier="query_task",
             description=f"Generate a database query for task: {task}",
@@ -193,7 +273,7 @@ def run_crew_pipeline(task: str, user_id: str, db_info: Dict[str, Any], visualiz
             return {
                 "success": False,
                 "error": "Failed to generate a valid database query for your request.",
-                "agents_called": ["schema_agent", "query_agent"]
+                "agents_called": ["chat_agent", "query_agent"]
             }
 
         # Validation Step
@@ -263,7 +343,7 @@ def run_crew_pipeline(task: str, user_id: str, db_info: Dict[str, Any], visualiz
             return {
                 "success": False,
                 "error": f"Query failed validation checks: {reason}",
-                "agents_called": ["schema_agent", "query_agent", "validation_agent"]
+                "agents_called": ["chat_agent", "query_agent", "validation_agent"]
             }
 
         logger.info(f"✅ Query passed validation: {reason}")
@@ -274,7 +354,7 @@ def run_crew_pipeline(task: str, user_id: str, db_info: Dict[str, Any], visualiz
             return {
                 "success": False,
                 "error": "Query generation did not return a valid string.",
-                "agents_called": ["schema_agent", "query_agent", "validation_agent"]
+                "agents_called": ["chat_agent", "query_agent", "validation_agent"]
             }
 
         db_response = execute_db_query(query_str, db_info, user_id)
@@ -284,7 +364,7 @@ def run_crew_pipeline(task: str, user_id: str, db_info: Dict[str, Any], visualiz
             return {
                 "success": False,
                 "error": f"Database query execution failed: {db_response.get('error')}",
-                "agents_called": ["schema_agent", "query_agent", "validation_agent"]
+                "agents_called": ["chat_agent", "query_agent", "validation_agent"]
             }
 
         if not db_response or "rows" not in db_response:
@@ -293,12 +373,12 @@ def run_crew_pipeline(task: str, user_id: str, db_info: Dict[str, Any], visualiz
                 "success": False,
                 "error": "No data returned from database.",
                 "query": query_str,
-                "agents_called": ["schema_agent", "query_agent", "validation_agent"]
+                "agents_called": ["chat_agent", "query_agent", "validation_agent"]
             }
 
         # Continue to Visualization and Chat Agents
         remaining_tasks = []
-        agents_called = ["schema_agent", "query_agent", "validation_agent"]
+        agents_called = ["chat_agent", "query_agent", "validation_agent"]
 
         if visualize:
             visualization_task = Task(
