@@ -108,7 +108,7 @@ def run_crew_pipeline(task: str, user_id: str, db_info: Dict[str, Any], visualiz
         
         logger.debug(f"Intent detection result: {intent_output}")
         
-        # Check intent classification result
+        # Improved intent parsing logic
         intent_type = "unknown"
         confidence = 0
         
@@ -134,19 +134,30 @@ def run_crew_pipeline(task: str, user_id: str, db_info: Dict[str, Any], visualiz
         logger.info(f"Detected intent: {intent_type} (confidence: {confidence})")
         
         # If it's conversational or the intent is unknown/unparseable, handle as conversation
-        if intent_type == "conversation" or intent_type == "unknown":
+        if intent_type in ["conversation", "unknown", "ambiguous"]:
             # Handle as conversation
+            chat_context = {
+                "description": "Respond to general user conversation",
+                "expected_output": "Friendly, helpful response",
+                "task": task,
+                "is_general_conversation": True,
+                "user_id": user_id  # Pass user_id for potential backend queries
+            }
+            
+            # If this appears to be a system question, add a flag
+            if any(term in task.lower() for term in [
+                "what database", "which database", "database connected", "connected to", 
+                "list database", "show database", "what kind of info", "what information", 
+                "what data", "database contain"
+            ]):
+                chat_context["is_system_question"] = True
+            
             chat_response_task = Task(
                 identifier="chat_response_task",
                 description=f"Respond to conversation: {task}",
                 agent=crew_chat_agent,
                 expected_output="Friendly conversation response",
-                context=[{
-                    "description": "Respond to general user conversation",
-                    "expected_output": "Friendly, helpful response",
-                    "task": task,
-                    "is_general_conversation": True
-                }]
+                context=[chat_context]
             )
             
             chat_crew = Crew(
@@ -182,17 +193,6 @@ def run_crew_pipeline(task: str, user_id: str, db_info: Dict[str, Any], visualiz
                 "final_output": {
                     "text": response_text,
                     "is_general_conversation": True
-                },
-                "agents_called": ["chat_agent"]
-            }
-        elif intent_type == "ambiguous":
-            # Ask for clarification
-            return {
-                "success": True,
-                "final_output": {
-                    "text": "I'm not sure if you're asking about database information or just chatting. Could you clarify your question?",
-                    "is_general_conversation": True,
-                    "requires_clarification": True
                 },
                 "agents_called": ["chat_agent"]
             }
