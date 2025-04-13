@@ -1,35 +1,92 @@
+# utils/logger.py
+
 import logging
+import sys
 import os
+from datetime import datetime
+from typing import Optional
 
-# === Logging Configuration ===
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
-LOG_TO_FILE = os.getenv("LOG_TO_FILE", "false").lower() == "true"
-LOG_FILE_PATH = os.getenv("LOG_FILE_PATH", "logs/ai_agent.log")
+# Try to import settings, but handle case where it's not available yet
+try:
+    from utils.settings import LOG_LEVEL, LOG_FORMAT, ENVIRONMENT
+except ImportError:
+    LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+    LOG_FORMAT = os.getenv("LOG_FORMAT", "%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 
-# Create formatter
-formatter = logging.Formatter(
-    fmt="%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S"
+# Set up logging
+logging.basicConfig(
+    level=getattr(logging, LOG_LEVEL.upper()),
+    format=LOG_FORMAT,
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
 )
 
-# Create root logger
-logger = logging.getLogger("ai-agent")
-logger.setLevel(LOG_LEVEL)
+# Create logger
+logger = logging.getLogger("ai-agent-network")
 
-# Avoid adding handlers multiple times (important when re-importing)
-if not logger.hasHandlers():
+# Set up file logging if not in development
+if ENVIRONMENT != "development":
+    # Create logs directory if it doesn't exist
+    os.makedirs("logs", exist_ok=True)
+    
+    # Create file handler for logging
+    log_file = f"logs/ai-agent-{datetime.now().strftime('%Y-%m-%d')}.log"
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    logger.addHandler(file_handler)
 
-    # Console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
+# Add colors to logs in development
+if ENVIRONMENT == "development":
+    try:
+        import coloredlogs
+        coloredlogs.install(
+            level=LOG_LEVEL.upper(),
+            logger=logger,
+            fmt=LOG_FORMAT
+        )
+        logger.debug("Colored logs enabled")
+    except ImportError:
+        logger.debug("coloredlogs package not found, continuing without colored logs")
 
-    # Optional: File handler
-    if LOG_TO_FILE:
-        import os
-        os.makedirs(os.path.dirname(LOG_FILE_PATH), exist_ok=True)
-        file_handler = logging.FileHandler(LOG_FILE_PATH)
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
 
-# ✅ You can now: from utils.logger import logger
+class LoggerAdapter(logging.LoggerAdapter):
+    """
+    Logger adapter to add context to log messages.
+    """
+    def process(self, msg, kwargs):
+        if self.extra:
+            return f"[{self.extra.get('context', 'general')}] {msg}", kwargs
+        return msg, kwargs
+
+
+def get_logger(context: Optional[str] = None) -> logging.Logger:
+    """
+    Get a logger with context.
+    
+    Args:
+        context: Optional context to add to log messages
+        
+    Returns:
+        Logger instance
+    """
+    if context:
+        return LoggerAdapter(logger, {"context": context})
+    return logger
+
+
+# Log startup
+logger.info(f"Logger initialized with level: {LOG_LEVEL}")
+
+# Export as default
+if __name__ == "__main__":
+    logger.debug("Debug message")
+    logger.info("Info message")
+    logger.warning("Warning message")
+    logger.error("Error message")
+    
+    # Test context logger
+    context_logger = get_logger("TEST")
+    context_logger.info("Context log message")
