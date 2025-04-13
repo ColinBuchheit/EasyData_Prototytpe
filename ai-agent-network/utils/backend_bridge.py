@@ -516,6 +516,9 @@ def register_ai_agent() -> bool:
         Boolean indicating if registration was successful
     """
     try:
+        # Log the URL we're trying to connect to for debugging
+        logger.info(f"Attempting to register AI agent with backend at: {BACKEND_API_URL}")
+        
         response = requests.post(
             f"{BACKEND_API_URL}/api/auth/agent/register", 
             json={
@@ -527,11 +530,21 @@ def register_ai_agent() -> bool:
             headers={
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {get_backend_token()}"
-            }
+            },
+            # Add timeout to prevent hanging
+            timeout=5.0
         )
         response.raise_for_status()
         logger.info(f"✅ AI agent registered with backend: {AI_AGENT_ID}")
         return True
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f"❌ Failed to connect to backend at {BACKEND_API_URL}: {e}")
+        logger.info("⚠️ Agent will continue to run with limited functionality. Backend-dependent features will not work.")
+        return False
+    except requests.exceptions.Timeout as e:
+        logger.error(f"❌ Connection to backend timed out: {e}")
+        logger.info("⚠️ Agent will continue to run with limited functionality. Backend-dependent features will not work.")
+        return False
     except Exception as e:
         logger.error(f"❌ Failed to register AI agent with backend: {e}")
         return False
