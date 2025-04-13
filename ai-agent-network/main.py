@@ -1,33 +1,39 @@
 # main.py
 
-from crew import run_crew_pipeline
-from utils.logger import logger
-from utils.context_manager import get_context, clear_context
-from typing import Dict, Any
+from crew import build_agent_network
+from dotenv import load_dotenv
+import sys
+import json
 
+load_dotenv()  # Load environment variables from .env
 
-def run(task: str, user_id: str, db_info: Dict[str, Any], visualize: bool = True):
-    """
-    Triggers the full AI Agent pipeline manually.
-    Returns structured result and prints to console.
-    """
-    logger.info(f"🧠 Running agent pipeline via main.py for user: {user_id}")
+def handle_user_input(user_id: str, message: str, db_info: dict, conversation_id: str, query: str = None):
+    orchestrator = build_agent_network()
 
-    result = run_crew_pipeline(
-        task=task,
-        user_id=user_id,
-        db_info=db_info,
-        visualize=visualize
-    )
+    task_payload = {
+        "user_id": user_id,
+        "message": message,
+        "db_info": db_info,
+        "conversation_id": conversation_id,
+    }
 
-    print("\n✅ Final Output:")
-    print(result)
+    if query:
+        task_payload["query"] = query
 
-    print("\n🧠 Cached Context:")
-    print(get_context(user_id) or {})
-
+    result = orchestrator.run(task_payload)
     return result
 
-
 if __name__ == "__main__":
-    print("⚠️ No CLI entry implemented. Use the `run()` function from a Python shell or test file.")
+    # CLI runner (for dev)
+    if len(sys.argv) < 5:
+        print("Usage: python main.py <user_id> <message> <db_info_json> <conversation_id> [<optional_query>]")
+        sys.exit(1)
+
+    user_id = sys.argv[1]
+    message = sys.argv[2]
+    db_info = json.loads(sys.argv[3])
+    conversation_id = sys.argv[4]
+    query = sys.argv[5] if len(sys.argv) > 5 else None
+
+    result = handle_user_input(user_id, message, db_info, conversation_id, query)
+    print(json.dumps(result, indent=2))
