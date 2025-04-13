@@ -1,5 +1,6 @@
 from agents.base_agent import BaseAgent
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional, Union
+import re
 import requests
 import json
 
@@ -9,15 +10,106 @@ from utils.token_usage_tracker import track_tokens
 from utils.api_client import APIClient
 from utils.error_handling import handle_agent_error, ErrorSeverity
 from utils.backend_bridge import fetch_schema_for_user_db, health_check
+from intent_system import IntentClassifier, IntentType
 
 class ChatAgent(BaseAgent):
     """
-    Enhanced ChatAgent that:
-    1. Correctly determines if a message is a conversation, database query, or system question
-    2. Accurately explains the system's capabilities
-    3. Knows the backend bridge APIs it can call to get real system information
-    4. Properly routes system questions to the appropriate backend calls
+    Agent for handling natural language conversations, intent classification,
+    and user-friendly explanations of data
     """
+    
+    def name(self) -> str:
+        return "chat_agent"
+    
+    def _ask_claude(self, prompt: str) -> str:
+        """
+        Helper method to query Claude API
+        """
+        try:
+            # Use APIClient to make request to Claude
+            api_client = APIClient(ANTHROPIC_API_KEY)
+            response = api_client.complete(prompt, model=CHAT_MODEL)
+            
+            # Track token usage for monitoring
+            track_tokens(prompt, response, CHAT_MODEL, self.name())
+            
+            return response
+        except Exception as e:
+            logger.error(f"Error calling Claude API: {e}")
+            return f"I encountered an error while processing your request: {str(e)}"
+    
+    def _handle_general_conversation(self, task: str) -> Dict[str, Any]:
+        """
+        Handle general conversation that doesn't relate to database operations
+        """
+        logger.info(f"💬 ChatAgent handling general conversation")
+        
+        prompt = f"""
+You are a helpful AI assistant focused on databases and data analysis. 
+The user is having a conversation with you that isn't specifically about querying a database.
+
+User message: {task}
+
+Respond in a friendly, helpful way. If they're asking about capabilities, explain you can help them query databases,
+understand schemas, visualize data, and explain results. If it's casual conversation, be friendly but professional.
+"""
+        
+        reply = self._ask_claude(prompt)
+        
+        return {
+            "success": True,
+            "type": "text",
+            "agent": self.name(),
+            "message": reply.strip()
+        }
+    
+    def _handle_system_question(self, task: str, user_id: str = None) -> Dict[str, Any]:
+        """
+        Handle questions about the system itself, database connections, etc.
+        """
+        logger.info(f"💬 ChatAgent handling system question")
+        
+        # Check if backend is available
+        backend_status = "connected" if health_check() else "unavailable"
+        
+        prompt = f"""
+You are a helpful AI assistant focused on helping users with database operations.
+The user has asked a system-related question about connections, settings, or capabilities.
+
+User question: {task}
+
+Information about the system:
+- Backend status: {backend_status}
+- User ID: {user_id if user_id else "Not logged in"}
+
+Respond in a friendly, helpful way focused on answering their system question.
+"""
+        
+        reply = self._ask_claude(prompt)
+        
+        return {
+            "success": True,
+            "type": "text",
+            "agent": self.name(),
+            "message": reply.strip()
+        }
+    
+    def _classify_intent(self, task: str) -> Dict[str, Any]:
+        """
+        Determine if user's message is a conversation, database query, or system question
+        using the enhanced intent classification system
+        """
+        logger.info(f"🔍 Classifying intent: {task}")
+        
+        # Use the external intent classifier instead of custom implementation
+        intent_result = IntentClassifier.classify_intent(task)
+        
+        # Log and return result
+        logger.info(f"Intent classification: {intent_result['intent_type']} (confidence: {intent_result['confidence']})")
+        
+        # Add success flag for consistency with previous implementation
+        intent_result["success"] = True
+        return intent_result
 
     def run(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         try:
@@ -28,14 +120,26 @@ class ChatAgent(BaseAgent):
             if operation == "classify_intent":
                 return self._classify_intent(task)
             
-            # System question handling
-            if input_data.get("is_system_question", False) or self._is_system_question(task):
+            # System question handling - updated to use IntentType
+            if input_data.get("is_system_question", False) or IntentType.SYSTEM_QUESTION.name == self._classify_intent(task).get("intent_type"):
                 return self._handle_system_question(task, input_data.get("user_id"))
             
-            # General conversation handling
-            if input_data.get("is_general_conversation", False):
+            # General conversation handling - updated to use IntentType
+            if input_data.get("is_general_conversation", False) or IntentType.CONVERSATION.name == self._classify_intent(task).get("intent_type"):
                 return self._handle_general_conversation(task)
             
+            # Data exploration handling - NEW
+            if IntentType.DATA_EXPLORATION.name == self._classify_intent(task).get("intent_type"):
+                return self._handle_data_exploration(task, input_data.get("user_id"), input_data.get("db_info"))
+            
+            # Multi-DB query handling - NEW
+            if IntentType.MULTI_DB_QUERY.name == self._classify_intent(task).get("intent_type"):
+                return self._handle_multi_db_query(task, input_data.get("user_id"))
+            
+            # Command handling - NEW
+            if IntentType.COMMAND.name == self._classify_intent(task).get("intent_type"):
+                return self._handle_command(task, input_data.get("user_id"))
+                
             # Regular explanation flow for query results
             raw_output = input_data.get("query_result") or input_data.get("raw_output")
             tone = input_data.get("tone", "friendly")
@@ -67,343 +171,349 @@ Explain this output to a business user in a {tone} tone. Use plain language. Do 
         except Exception as e:
             logger.exception("❌ ChatAgent failed to run.")
             return handle_agent_error(self.name(), e, ErrorSeverity.MEDIUM)
-    
-    def _is_system_question(self, task: str) -> bool:
-        """Determine if the question is about the system itself or database connections"""
-        task_lower = task.lower().strip()
-        
-        system_patterns = [
-            "what database", "which database", "database connected", 
-            "what kind of info", "what information", "what data", 
-            "what's in the database", "database contain", "connected to",
-            "what databases", "show databases", "list databases",
-            "connection", "connections", "what connections", "database connections",
-            "what system", "what are you", "how do you work",
-            "what can you access", "my databases", "my connections"
-        ]
-        
-        return any(pattern in task_lower for pattern in system_patterns)
-    
-    def _handle_system_question(self, task: str, user_id: str = None) -> Dict[str, Any]:
+
+    def _handle_data_exploration(self, task: str, user_id: str = None, db_info: Dict[str, Any] = None) -> Dict[str, Any]:
         """
-        Handle questions about the system by using the backend bridge to fetch actual information
-        rather than giving generic responses.
+        Handle data exploration requests (schema inspection, table/column discovery)
         """
-        task_lower = task.lower().strip()
-        logger.info(f"Handling system question: {task}")
+        logger.info(f"Handling data exploration request: {task}")
         
-        # For questions about database connections
-        if any(pattern in task_lower for pattern in [
-            "what connection", "which connection", "database connection", 
-            "my connection", "list connection", "show connection",
-            "what database", "which database", "database access",
-            "connected to", "list database", "show database", "my database"
-        ]):
-            # We need to use the backend bridge to get this information
-            # The proper approach is to let the user know we need to request this info from backend
+        if not user_id or not db_info:
             return {
                 "success": True,
                 "type": "text",
                 "agent": self.name(),
-                "message": """
-To see your database connections, you should:
-
-1. Check the connections panel in the user interface
-2. Use the backend API's /api/connections endpoint 
-
-I don't have direct access to list your connections, but I can help you query a database if you specify which one you want to use. For example, you can say "Show me the tables in my PostgreSQL database."
-
-The backend currently supports these database types: PostgreSQL, MySQL, MongoDB, SQLite, MS SQL, Firebase, CouchDB, and DynamoDB.
-"""
+                "message": "To explore your database structure, I need information about which database you want to explore. Please select a database first."
             }
         
-        # For general system health/status questions
-        if any(pattern in task_lower for pattern in ["system status", "health", "is working", "online"]):
-            try:
-                # Use the health_check function from backend_bridge
-                health_status = health_check()
+        # Try to fetch schema information
+        try:
+            from utils.backend_bridge import fetch_schema_for_user_db
+            schema_result = fetch_schema_for_user_db(db_info, user_id)
+            
+            if schema_result.get("success", False) and "schema" in schema_result:
+                schema = schema_result["schema"]
                 
-                if health_status.get("status") == "ok":
+                # Format schema information based on the task
+                task_lower = task.lower()
+                if "what tables" in task_lower or "list tables" in task_lower or "show tables" in task_lower:
+                    tables = schema.get("tables", [])
+                    if tables:
+                        tables_list = ", ".join(tables)
+                        return {
+                            "success": True,
+                            "type": "text",
+                            "agent": self.name(),
+                            "message": f"The database contains the following tables: {tables_list}"
+                        }
+                    else:
+                        return {
+                            "success": True,
+                            "type": "text",
+                            "agent": self.name(),
+                            "message": "This database doesn't contain any tables yet."
+                        }
+                
+                # Handle column exploration
+                elif "columns" in task_lower or "schema" in task_lower or "structure" in task_lower:
+                    # If a specific table is mentioned
+                    table_match = re.search(r"(in|of|for)\s+(?:the\s+)?(\w+)\s+table", task_lower)
+                    if table_match:
+                        table_name = table_match.group(2)
+                        if table_name in schema.get("columns", {}):
+                            columns = schema["columns"][table_name]
+                            columns_list = "\n".join([f"- {col['name']} ({col['type']})" for col in columns])
+                            return {
+                                "success": True,
+                                "type": "text",
+                                "agent": self.name(),
+                                "message": f"The {table_name} table has the following columns:\n\n{columns_list}"
+                            }
+                        else:
+                            return {
+                                "success": True,
+                                "type": "text",
+                                "agent": self.name(),
+                                "message": f"I couldn't find a table named '{table_name}' in the database."
+                            }
+                    else:
+                        # Show all tables with their columns
+                        tables_info = []
+                        for table in schema.get("tables", []):
+                            columns = schema.get("columns", {}).get(table, [])
+                            if columns:
+                                columns_summary = ", ".join([col['name'] for col in columns[:5]])
+                                if len(columns) > 5:
+                                    columns_summary += f", and {len(columns)-5} more"
+                                tables_info.append(f"- {table}: {columns_summary}")
+                            else:
+                                tables_info.append(f"- {table}")
+                        
+                        if tables_info:
+                            return {
+                                "success": True,
+                                "type": "text",
+                                "agent": self.name(),
+                                "message": f"Here's an overview of the database schema:\n\n" + "\n".join(tables_info)
+                            }
+                        else:
+                            return {
+                                "success": True,
+                                "type": "text",
+                                "agent": self.name(),
+                                "message": "I couldn't find any table structures in the database."
+                            }
+                
+                # Handle relationships exploration
+                elif "relationships" in task_lower or "foreign keys" in task_lower or "joins" in task_lower:
+                    # Try to get relationships from backend
+                    try:
+                        from utils.backend_bridge import fetch_database_relationships
+                        relationships_result = fetch_database_relationships(db_info.get("id"), user_id)
+                        
+                        if relationships_result.get("success", False) and "relationships" in relationships_result:
+                            relationships = relationships_result["relationships"]
+                            if relationships:
+                                rel_list = "\n".join([
+                                    f"- {rel.get('table_from')}.{rel.get('column_from')} → {rel.get('table_to')}.{rel.get('column_to')}"
+                                    for rel in relationships
+                                ])
+                                return {
+                                    "success": True,
+                                    "type": "text",
+                                    "agent": self.name(),
+                                    "message": f"The database has the following relationships:\n\n{rel_list}"
+                                }
+                            else:
+                                return {
+                                    "success": True,
+                                    "type": "text",
+                                    "agent": self.name(),
+                                    "message": "I couldn't find any explicit relationships defined in the database schema."
+                                }
+                    except Exception as e:
+                        logger.error(f"Error fetching relationships: {e}")
+                        # Fall through to generic response
+                
+                # Generic schema response
+                return {
+                    "success": True,
+                    "type": "text",
+                    "agent": self.name(),
+                    "message": f"I've analyzed the database schema for '{db_info.get('database_name', 'your database')}'. It contains {len(schema.get('tables', []))} tables. You can ask about specific tables or columns for more details."
+                }
+            else:
+                return {
+                    "success": True,
+                    "type": "text",
+                    "agent": self.name(),
+                    "message": "I couldn't retrieve the database schema. Please check your database connection."
+                }
+        except Exception as e:
+            logger.error(f"Error exploring database: {e}")
+            return {
+                "success": True,
+                "type": "text",
+                "agent": self.name(),
+                "message": f"I encountered an error while exploring the database: {str(e)}"
+            }
+
+    def _handle_multi_db_query(self, task: str, user_id: str = None) -> Dict[str, Any]:
+        """
+        Handle queries that need to be executed across multiple databases
+        """
+        logger.info(f"Handling multi-database query: {task}")
+        
+        if not user_id:
+            return {
+                "success": True,
+                "type": "text",
+                "agent": self.name(),
+                "message": "To query across multiple databases, I need to know which databases you're connected to. Please make sure you're logged in and have database connections."
+            }
+        
+        # Try to get user's databases
+        try:
+            from utils.backend_bridge import fetch_user_connections
+            
+            if not hasattr(fetch_user_connections, '__call__'):
+                return {
+                    "success": True,
+                    "type": "text", 
+                    "agent": self.name(),
+                    "message": "I'm not able to query across your databases at the moment. This feature requires backend support that isn't available."
+                }
+            
+            connections = fetch_user_connections(user_id)
+            
+            if not connections or len(connections) < 2:
+                return {
+                    "success": True,
+                    "type": "text",
+                    "agent": self.name(),
+                    "message": "You need at least two connected databases to perform cross-database queries. I found only " + 
+                              (f"{len(connections)} database connection." if connections else "no database connections.")
+                }
+            
+            # Get database IDs
+            db_ids = [conn.get('id') for conn in connections if 'id' in conn]
+            
+            if len(db_ids) < 2:
+                return {
+                    "success": True,
+                    "type": "text",
+                    "agent": self.name(),
+                    "message": "I couldn't find valid database IDs for multiple databases. Please check your connections."
+                }
+            
+            # Execute the multi-database query
+            try:
+                from utils.backend_bridge import execute_multi_db_query
+                result = execute_multi_db_query(task, db_ids, user_id)
+                
+                if result.get("success", False):
+                    # Format the results
+                    output = "Here are the results from querying across your databases:\n\n"
+                    
+                    if "results" in result:
+                        for db_name, db_result in result["results"].items():
+                            output += f"From {db_name}:\n"
+                            if isinstance(db_result, list) and db_result:
+                                output += f"- Found {len(db_result)} records\n"
+                            elif isinstance(db_result, dict):
+                                for key, value in db_result.items():
+                                    output += f"- {key}: {value}\n"
+                            else:
+                                output += f"- {db_result}\n"
+                            output += "\n"
+                    
                     return {
                         "success": True,
                         "type": "text",
                         "agent": self.name(),
-                        "message": "✅ The system is online and working properly. The backend API is responsive."
+                        "message": output
                     }
                 else:
                     return {
                         "success": True,
                         "type": "text",
                         "agent": self.name(),
-                        "message": f"⚠️ There seems to be an issue with the system: {health_status.get('message', 'Unknown error')}"
+                        "message": f"There was a problem executing the cross-database query: {result.get('error', 'Unknown error')}"
                     }
             except Exception as e:
-                logger.error(f"Error checking system health: {e}")
+                logger.error(f"Error executing multi-db query: {e}")
                 return {
                     "success": True,
                     "type": "text",
                     "agent": self.name(),
-                    "message": "There was an error checking the system status. The backend may be experiencing issues."
+                    "message": f"I encountered an error while trying to execute the cross-database query: {str(e)}"
                 }
-        
-        # For database content exploration questions
-        if any(pattern in task_lower for pattern in ["what kind of info", "what information", "what data", "database contain"]):
+        except Exception as e:
+            logger.error(f"Error getting user connections: {e}")
             return {
                 "success": True,
                 "type": "text",
                 "agent": self.name(),
-                "message": """
-To explore your database contents, you need to specify which database you want to query. Once you do that, I can help with:
+                "message": f"I encountered an error while trying to access your database connections: {str(e)}"
+            }
 
-1. "Show me all tables in my [database_name] database"
-2. "What columns are in the [table_name] table?"
-3. "Show me a sample of data from the [table_name] table"
-4. "What relationships exist between tables?"
-
-I'll work with the Schema Agent to fetch the structure information from the backend, and then I can help you explore your data.
-"""
+    def _handle_command(self, task: str, user_id: str = None) -> Dict[str, Any]:
+        """
+        Handle system commands like switching databases or adjusting settings
+        """
+        logger.info(f"Handling command: {task}")
+        
+        if not user_id:
+            return {
+                "success": True,
+                "type": "text",
+                "agent": self.name(),
+                "message": "To execute commands, I need to know which user you are. Please make sure you're logged in."
             }
         
-        # General capabilities explanation
-        capabilities_explanation = """
-I'm part of the AI-Agent-Network that works with the AI-DB-Backend system. Here's what our agent network can do:
-
-1. Connect to multiple database types (PostgreSQL, MySQL, MongoDB, SQLite, MS SQL, Firebase, CouchDB, DynamoDB)
-2. Translate your natural language questions into database queries
-3. Send those queries to the backend for execution
-4. Process the results and provide visualizations
-5. Explain the data in conversational language
-
-I coordinate with specialized agents:
-- Schema Agent: Gets database structure from the backend
-- Query Agent: Converts your question to a database query
-- Validation Agent: Checks query safety and correctness
-- Visualization Agent: Creates charts from query results
-
-We don't directly access databases - we send all requests through the backend API, which handles the actual database connections and query execution.
-
-What would you like to know about your data?
-"""
-
+        task_lower = task.lower()
+        
+        # Handle database switching
+        if any(phrase in task_lower for phrase in ["switch to", "use", "connect to"]):
+            db_name_match = re.search(r"(?:switch|use|connect) to\s+(?:the\s+)?['\"]?([a-zA-Z0-9_\- ]+)['\"]?\s+(?:database|db)", task_lower)
+            
+            if not db_name_match:
+                db_name_match = re.search(r"(?:switch|use|connect) to\s+(?:the\s+)?database\s+['\"]?([a-zA-Z0-9_\- ]+)['\"]?", task_lower)
+            
+            if db_name_match:
+                db_name = db_name_match.group(1).strip()
+                
+                # Try to find the database in user's connections
+                try:
+                    from utils.backend_bridge import fetch_user_connections, set_database_context
+                    
+                    if not hasattr(fetch_user_connections, '__call__') or not hasattr(set_database_context, '__call__'):
+                        return {
+                            "success": True,
+                            "type": "text",
+                            "agent": self.name(),
+                            "message": "I'm not able to switch databases at the moment. This feature requires backend support that isn't available."
+                        }
+                    
+                    connections = fetch_user_connections(user_id)
+                    
+                    if not connections:
+                        return {
+                            "success": True,
+                            "type": "text",
+                            "agent": self.name(),
+                            "message": "You don't have any database connections. Please connect to a database first."
+                        }
+                    
+                    # Find the database by name
+                    matching_dbs = [
+                        conn for conn in connections 
+                        if conn.get('database_name', '').lower() == db_name.lower() or
+                           conn.get('connection_name', '').lower() == db_name.lower()
+                    ]
+                    
+                    if matching_dbs:
+                        db_id = matching_dbs[0].get('id')
+                        result = set_database_context(user_id, db_id)
+                        
+                        if result.get("success", False):
+                            return {
+                                "success": True,
+                                "type": "text",
+                                "agent": self.name(),
+                                "message": f"I've switched to the '{matching_dbs[0].get('database_name')}' database. You can now query this database directly."
+                            }
+                        else:
+                            return {
+                                "success": True,
+                                "type": "text",
+                                "agent": self.name(),
+                                "message": f"I couldn't switch to the database. Error: {result.get('error', 'Unknown error')}"
+                            }
+                    else:
+                        db_list = ", ".join([
+                            conn.get('connection_name') or conn.get('database_name') 
+                            for conn in connections
+                        ])
+                        return {
+                            "success": True,
+                            "type": "text",
+                            "agent": self.name(),
+                            "message": f"I couldn't find a database named '{db_name}'. Your available databases are: {db_list}"
+                        }
+                except Exception as e:
+                    logger.error(f"Error switching database: {e}")
+                    return {
+                        "success": True,
+                        "type": "text",
+                        "agent": self.name(),
+                        "message": f"I encountered an error while trying to switch databases: {str(e)}"
+                    }
+        
+        # Generic command response
         return {
             "success": True,
             "type": "text",
             "agent": self.name(),
-            "message": capabilities_explanation.strip()
+            "message": "I understood that you want me to perform a command, but I'm not sure what specific command you want. You can ask me to switch databases or perform other system operations."
         }
-
-    def _handle_general_conversation(self, task: str) -> Dict[str, Any]:
-        """Handle general conversation not related to database queries"""
-        task_lower = task.lower().strip()
-        
-        # Simple greeting responses
-        greetings = ["hi", "hello", "hey", "greetings", "howdy", "what's up", "hi there"]
-        if task_lower in greetings or any(task_lower.startswith(g) for g in greetings):
-            return {
-                "success": True,
-                "type": "text",
-                "agent": self.name(),
-                "message": "Hello! I'm your AI database assistant. I can help you query your databases using natural language and visualize the results. What would you like to know about your data?"
-            }
-            
-        # Help request or what can you do
-        if any(phrase in task_lower for phrase in ["help", "what can you do", "how do you work"]):
-            return {
-                "success": True,
-                "type": "text",
-                "agent": self.name(),
-                "message": """I can help you access information from your databases using natural language. For example, you can ask me things like:
-
-- Show me the top 10 products by sales
-- What are the most recent orders?
-- How many users signed up last month?
-- Find customers who spent over $1000 last quarter
-- What's the average order value by category?
-
-Just describe what you'd like to know, and I'll translate that into a database query, send it to the backend for execution, and explain the results."""
-            }
-            
-        # For other conversational inputs, use Claude
-        prompt = f"""
-The user has sent a conversational message: "{task}"
-
-This appears to be a general conversation rather than a database query. 
-Respond in a helpful, friendly way. If it seems like they might be trying to 
-ask about database information but were unclear, gently suggest they can ask 
-about specific data if they'd like.
-
-Keep your response under 100 words.
-"""
-
-        try:
-            response = self._ask_claude(prompt)
-            return {
-                "success": True,
-                "type": "text",
-                "agent": self.name(),
-                "message": response.strip()
-            }
-        except Exception as e:
-            logger.error(f"Error generating conversation response: {e}")
-            # Fallback response
-            return {
-                "success": True,
-                "type": "text",
-                "agent": self.name(),
-                "message": "I'm your database assistant. I can help you query your databases using natural language. What would you like to know about your data?"
-            }
-
-    def _classify_intent(self, task: str) -> Dict[str, Any]:
-        """Determine if user's message is a conversation, database query, or system question"""
-        logger.info(f"🔍 Classifying intent: {task}")
-        
-        task_lower = task.lower().strip()
-        
-        # Handle system questions separately - check this first
-        if self._is_system_question(task_lower):
-            return {
-                "success": True,
-                "intent_type": "system_question",  # New intent type specifically for system questions
-                "confidence": 0.9,
-                "reasoning": "System information or database connection question detected"
-            }
-        
-        # Check for obvious greetings
-        greetings = ["hi", "hello", "hey", "greetings", "howdy", "what's up", "hi there"]
-        if task_lower in greetings or any(task_lower.startswith(g) for g in greetings):
-            return {
-                "success": True,
-                "intent_type": "conversation",
-                "confidence": 0.95,
-                "reasoning": "Clear greeting pattern detected"
-            }
-            
-        # Check for obvious help requests
-        help_patterns = ["help", "what can you do", "how do you work", "what is this"]
-        if any(pattern in task_lower for pattern in help_patterns):
-            return {
-                "success": True,
-                "intent_type": "conversation",
-                "confidence": 0.9,
-                "reasoning": "Help or information request detected"
-            }
-            
-        # Check for clear database query indicators
-        db_terms = ["select", "query", "table", "find", "show me", "search for", 
-               "list", "count", "report", "analyze", "data", "records", "rows", 
-               "where", "how many", "average", "sum", "minimum", "maximum"]
-        
-        if any(term in task_lower for term in db_terms):
-            return {
-                "success": True,
-                "intent_type": "query",
-                "confidence": 0.85,
-                "reasoning": "Contains database query terminology"
-            }
-        
-        # For more complex or ambiguous inputs, use Claude to classify
-        prompt = f"""
-Task: Determine if the following user message is requesting database information, asking about system/connection information, or just having a general conversation.
-
-User message: "{task}"
-
-Analyze the message and respond with ONLY a JSON object in the following format:
-{{
-  "intent_type": "query" or "system_question" or "conversation" or "ambiguous",
-  "confidence": [score between 0.0 and 1.0],
-  "reasoning": "[brief explanation of your classification]"
-}}
-
-The "intent_type" should be:
-- "query" if the user is clearly asking for information FROM a database (like querying data)
-- "system_question" if the user is asking ABOUT connections, database systems, or what databases are available
-- "conversation" if the user is clearly just having a general conversation
-- "ambiguous" if it's unclear what the user wants
-
-Be very conservative with classification - only use a category when you're confident.
-"""
-
-        try:
-            # Use the APIClient utility for retries and timeouts
-            response = APIClient.call_anthropic_api(
-                endpoint="messages",
-                payload={
-                    "model": CHAT_MODEL,
-                    "max_tokens": 512,
-                    "temperature": 0.2,
-                    "system": "You are an expert at determining user intent in conversations with database systems.",
-                    "messages": [
-                        {"role": "user", "content": prompt}
-                    ]
-                },
-                api_key=ANTHROPIC_API_KEY,
-                retries=2,
-                timeout=10
-            )
-
-            # Claude doesn't return token usage yet — approximate:
-            token_guess = len(prompt.split()) + 150
-            track_tokens("chat_agent", CHAT_MODEL, token_guess // 2, token_guess // 2)
-
-            content = response["content"][0]["text"]
-            
-            try:
-                # Parse the JSON response
-                intent_data = json.loads(content)
-                logger.info(f"Intent classification: {intent_data['intent_type']} (confidence: {intent_data['confidence']})")
-                
-                # Add success flag for consistency
-                intent_data["success"] = True
-                return intent_data
-            except json.JSONDecodeError:
-                # Fallback if not valid JSON
-                logger.error(f"Failed to parse intent classification response: {content}")
-                return {
-                    "success": True,
-                    "intent_type": "ambiguous",
-                    "confidence": 0.5,
-                    "reasoning": "Failed to parse intent classification"
-                }
-
-        except Exception as e:
-            logger.error(f"❌ Intent classification failed: {e}")
-            # Fallback to ambiguous
-            return {
-                "success": True,
-                "intent_type": "ambiguous",
-                "confidence": 0.5,
-                "reasoning": f"Error during classification: {str(e)}"
-            }
-
-    def _ask_claude(self, prompt: str) -> str:
-        """Call Claude API with improved error handling and retries"""
-        payload = {
-            "model": CHAT_MODEL,
-            "max_tokens": 512,
-            "temperature": 0.5,
-            "system": "You are a helpful database assistant that explains technical outputs to business users and helps with database-related questions.",
-            "messages": [
-                {"role": "user", "content": prompt}
-            ]
-        }
-
-        try:
-            # Use the APIClient utility for retries and timeouts
-            response = APIClient.call_anthropic_api(
-                endpoint="messages",
-                payload=payload,
-                api_key=ANTHROPIC_API_KEY,
-                retries=3,
-                timeout=30
-            )
-
-            # Claude doesn't return token usage yet — approximate:
-            token_guess = len(prompt.split()) + 150
-            track_tokens("chat_agent", CHAT_MODEL, token_guess // 2, token_guess // 2)
-
-            content = response["content"][0]["text"]
-            return content
-
-        except Exception as e:
-            logger.error(f"❌ Claude call failed in ChatAgent: {e}")
-            return "The assistant was unable to generate a response."
