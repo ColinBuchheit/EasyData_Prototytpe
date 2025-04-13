@@ -15,7 +15,7 @@ from db_adapters.db_adapter_router import get_adapter_for_db
 from db_adapters.base_db_adapters import UserDatabase
 
 from utils.context_manager import get_context, set_context, append_to_context
-from utils.backend_bridge import fetch_query_result, fetch_schema_for_user_db
+from utils.backend_bridge import fetch_query_result, fetch_schema_for_user_db, save_conversation_to_backend
 from utils.logger import logger
 from utils.error_handling import handle_agent_error, ErrorSeverity
 
@@ -66,13 +66,17 @@ crew_chat_agent = CrewAIAgentAdapter.create_crew_agent(
 
 # === Execute Query Between Tasks ===
 def execute_db_query(query: str, db_info: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    """
+    Sends a query to the backend for execution.
+    Does NOT execute database queries directly.
+    """
     try:
-        logger.info(f"🔍 Executing query for user {user_id}")
+        logger.info(f"🔍 Sending query to backend for user {user_id}")
         result = fetch_query_result(query=query, db_info=db_info, user_id=user_id)
         append_to_context(user_id, {"query_result": result})
         return result
     except Exception as e:
-        logger.exception("❌ Database query execution failed:")
+        logger.exception("❌ Backend query execution failed:")
         return {"error": str(e)}
 
 # === Main Orchestration Function ===
@@ -84,7 +88,7 @@ def run_crew_pipeline(task: str, user_id: str, db_info: Dict[str, Any], visualiz
         # First, detect intent with Chat Agent
         chat_task = Task(
             identifier="intent_detection_task",
-            description=f"Determine if this is a conversation or database query: {task}",
+            description=f"Determine if this is a conversation, database query, or system question: {task}",
             agent=crew_chat_agent,
             expected_output="Classification of user intent",
             context=[{
@@ -124,7 +128,10 @@ def run_crew_pipeline(task: str, user_id: str, db_info: Dict[str, Any], visualiz
             except:
                 # Look for specific keywords in the text response
                 intent_output_lower = intent_output.lower()
-                if "conversation" in intent_output_lower or "greeting" in intent_output_lower:
+                if "system" in intent_output_lower or "connection" in intent_output_lower:
+                    intent_type = "system_question"
+                    confidence = 0.8
+                elif "conversation" in intent_output_lower or "greeting" in intent_output_lower:
                     intent_type = "conversation"
                     confidence = 0.8
                 elif "query" in intent_output_lower or "database" in intent_output_lower:
@@ -133,6 +140,73 @@ def run_crew_pipeline(task: str, user_id: str, db_info: Dict[str, Any], visualiz
         
         logger.info(f"Detected intent: {intent_type} (confidence: {confidence})")
         
+        # Handle system questions specially (about connections, database systems, etc.)
+        if intent_type == "system_question":
+            # Create a specialized context for system questions
+            system_question_context = {
+                "description": "Answer question about database connections or system information",
+                "expected_output": "Helpful information about the system or available connections",
+                "task": task,
+                "is_system_question": True,
+                "user_id": user_id
+            }
+            
+            system_response_task = Task(
+                identifier="system_question_task",
+                description=f"Answer system question: {task}",
+                agent=crew_chat_agent,
+                expected_output="Helpful system information response",
+                context=[system_question_context]
+            )
+            
+            system_crew = Crew(
+                agents=[crew_chat_agent],
+                tasks=[system_response_task],
+                verbose=True,
+                process="sequential"
+            )
+            
+            system_result = system_crew.kickoff()
+            system_output = getattr(system_result, "system_question_task", "")
+            
+            # Extract the response message
+            response_text = ""
+            if isinstance(system_output, str):
+                response_text = system_output
+            elif isinstance(system_output, dict):
+                response_text = system_output.get("message", "")
+            
+            # If response_text is still empty, look for other possible keys
+            if not response_text and isinstance(system_output, dict):
+                for key in ["response", "text", "answer", "content"]:
+                    if key in system_output and system_output[key]:
+                        response_text = system_output[key]
+                        break
+            
+            # If response_text is still empty, provide a default response
+            if not response_text:
+                response_text = "I can help you with information about your database connections and system capabilities. What would you like to know?"
+            
+            # Save conversation context to backend if possible
+            try:
+                save_conversation_to_backend({
+                    "user_id": user_id,
+                    "prompt": task,
+                    "output": response_text,
+                    "intent_type": "system_question"
+                })
+            except Exception as e:
+                logger.warning(f"Failed to save conversation to backend: {e}")
+            
+            return {
+                "success": True,
+                "final_output": {
+                    "text": response_text,
+                    "is_system_question": True
+                },
+                "agents_called": ["chat_agent"]
+            }
+                
         # If it's conversational or the intent is unknown/unparseable, handle as conversation
         if intent_type in ["conversation", "unknown", "ambiguous"]:
             # Handle as conversation
@@ -143,14 +217,6 @@ def run_crew_pipeline(task: str, user_id: str, db_info: Dict[str, Any], visualiz
                 "is_general_conversation": True,
                 "user_id": user_id  # Pass user_id for potential backend queries
             }
-            
-            # If this appears to be a system question, add a flag
-            if any(term in task.lower() for term in [
-                "what database", "which database", "database connected", "connected to", 
-                "list database", "show database", "what kind of info", "what information", 
-                "what data", "database contain"
-            ]):
-                chat_context["is_system_question"] = True
             
             chat_response_task = Task(
                 identifier="chat_response_task",
@@ -187,6 +253,17 @@ def run_crew_pipeline(task: str, user_id: str, db_info: Dict[str, Any], visualiz
             # If still empty, provide a default response
             if not response_text:
                 response_text = "I'm here to help with your database queries or chat with you. What would you like to do?"
+            
+            # Save conversation context to backend if possible
+            try:
+                save_conversation_to_backend({
+                    "user_id": user_id,
+                    "prompt": task,
+                    "output": response_text,
+                    "intent_type": "conversation"
+                })
+            except Exception as e:
+                logger.warning(f"Failed to save conversation to backend: {e}")
             
             return {
                 "success": True,
@@ -228,7 +305,6 @@ def run_crew_pipeline(task: str, user_id: str, db_info: Dict[str, Any], visualiz
         
         # Now create the UserDatabase instance with the sanitized db_info
         db = UserDatabase(**db_info_copy)
-        adapter = get_adapter_for_db(db.db_type)
         
         append_to_context(user_id, {"schema": schema_output})
 
@@ -267,13 +343,13 @@ def run_crew_pipeline(task: str, user_id: str, db_info: Dict[str, Any], visualiz
 
         append_to_context(user_id, {"query": query_output})
         
-        # Continue with validation, only if we got a valid query string
+        # Continue with validation via ValidationSecurityAgent
         if not query_str or len(query_str.strip()) < 5:  # Very short query strings are likely errors
             logger.warning(f"⚠️ No valid query string generated for task: {task}")
             return {
                 "success": False,
                 "error": "Failed to generate a valid database query for your request.",
-                "agents_called": ["chat_agent", "query_agent"]
+                "agents_called": ["chat_agent", "schema_agent", "query_agent"]
             }
 
         # Validation Step
@@ -287,7 +363,7 @@ def run_crew_pipeline(task: str, user_id: str, db_info: Dict[str, Any], visualiz
                 "expected_output": 'Strict JSON: { "valid": true|false, "reason": "explanation" }',
                 "task": task,
                 "query": query_str,
-                "db_type": db.db_type  # Pass db_type to validation agent
+                "db_type": db_info.get("db_type", "unknown")  # Pass db_type to validation agent
             }]
         )
 

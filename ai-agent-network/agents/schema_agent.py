@@ -1,5 +1,3 @@
-# agents/schema_agent.py
-
 from agents.base_agent import BaseAgent
 from db_adapters.base_db_adapters import UserDatabase, BaseDBAdapter
 from typing import Dict, Any, List
@@ -18,6 +16,7 @@ class SchemaAgent(BaseAgent):
     2. Analyzes schema to understand database content and purpose
     3. Helps select the most appropriate database for a given query
     4. Detects general conversation vs actual database queries
+    5. Handles system questions about database connectivity and structure
     """
 
     def run(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -37,6 +36,9 @@ class SchemaAgent(BaseAgent):
             return self._analyze_schema(input_data)
         elif operation == "match_database":
             return self._match_database_for_query(input_data)
+        elif operation == "system_info":
+            # New operation for handling system questions about databases
+            return self._handle_system_database_questions(input_data)
         else:
             # Default to schema fetching functionality
             return self._fetch_schema(input_data)
@@ -238,6 +240,108 @@ class SchemaAgent(BaseAgent):
         except Exception as e:
             logger.exception(f"❌ Database matching failed: {str(e)}")
             return handle_agent_error(self.name(), e, ErrorSeverity.HIGH)
+
+    def _handle_system_database_questions(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle questions about database availability and structure"""
+        try:
+            user_id = input_data.get("user_id", "")
+            task = input_data.get("task", "")
+            db_info = input_data.get("db_info", {})
+            
+            logger.info(f"🔍 SchemaAgent handling system question: '{task}' for user {user_id}")
+            
+            # First, try to fetch available databases for the user
+            try:
+                # Import here to avoid circular imports
+                from utils.backend_bridge import fetch_user_connections
+                
+                if hasattr(fetch_user_connections, '__call__'):
+                    logger.info(f"🔍 Fetching user connections from backend for user {user_id}")
+                    connections = fetch_user_connections(user_id)
+                    
+                    if connections and isinstance(connections, list) and len(connections) > 0:
+                        # Format the connections for display
+                        db_list = "\n".join([
+                            f"- {conn.get('connection_name') or conn.get('database_name')} ({conn.get('db_type', 'Unknown type')})"
+                            for conn in connections
+                        ])
+                        
+                        return {
+                            "success": True,
+                            "type": "database_connections",
+                            "agent": self.name(),
+                            "message": f"You are connected to the following databases through the backend system:\n\n{db_list}\n\nI can help you query these databases by translating your questions into the appropriate query language."
+                        }
+                    else:
+                        return {
+                            "success": True,
+                            "type": "database_connections",
+                            "agent": self.name(),
+                            "message": "You don't appear to have any active database connections at the moment. You'll need to connect to a database through the system interface before I can help you query it."
+                        }
+            except Exception as e:
+                logger.error(f"Error fetching user connections: {e}")
+                # Continue to try other methods
+            
+            # If fetching connections failed, but we have db_info, try to provide info about that
+            if db_info and user_id:
+                try:
+                    schema_result = fetch_schema_for_user_db(db_info, user_id)
+                    
+                    if schema_result.get("success", False) and "schema" in schema_result:
+                        schema = schema_result.get("schema", {})
+                        db_name = db_info.get("database_name", "Unknown database")
+                        db_type = db_info.get("db_type", "Unknown type")
+                        tables = schema.get("tables", [])
+                        
+                        table_list = ""
+                        if tables:
+                            table_list = "\n".join([f"- {table}" for table in tables])
+                            table_list = f"\n\nThis database contains the following tables:\n{table_list}"
+                        
+                        return {
+                            "success": True,
+                            "type": "database_info",
+                            "agent": self.name(),
+                            "message": f"You are currently working with a {db_type} database named '{db_name}'.{table_list}\n\nI can help you query this database by translating your questions into the appropriate query language."
+                        }
+                except Exception as e:
+                    logger.error(f"Error fetching schema for current db: {e}")
+            
+            # If we couldn't get specific information, provide a generic response
+            task_lower = task.lower()
+            
+            # Tailor response based on the type of question
+            if any(term in task_lower for term in ["have access", "access to"]):
+                return {
+                    "success": True,
+                    "type": "system_info", 
+                    "agent": self.name(),
+                    "message": "The AI-Agent-Network is designed to work with databases you've connected through the backend system. I don't have direct access to see what databases you're connected to at the moment. Please check the connections panel in the user interface to see your available databases."
+                }
+            elif any(term in task_lower for term in ["what's in", "contains", "data in"]):
+                return {
+                    "success": True,
+                    "type": "system_info",
+                    "agent": self.name(),
+                    "message": "To explore what's in your connected databases, you can ask questions like 'Show me the tables in my database' or 'What columns are in the [table_name] table?'. I can then query the schema information from your connected databases."
+                }
+            else:
+                return {
+                    "success": True,
+                    "type": "system_info",
+                    "agent": self.name(),
+                    "message": "The AI-Agent-Network is designed to help query databases you've connected through the backend system. You can connect to various database types (PostgreSQL, MySQL, MongoDB, SQLite, etc.) through the system interface, and then I can help you query them using natural language."
+                }
+                
+        except Exception as e:
+            logger.exception(f"❌ Error handling system database question: {str(e)}")
+            return handle_agent_error(
+                self.name(),
+                e,
+                ErrorSeverity.MEDIUM,
+                suggestions=["Check backend connection", "Verify user has database access"]
+            )
 
     def _parse_columns(self, raw: Any, db_type: str) -> List[Dict[str, str]]:
         # Your existing code...
