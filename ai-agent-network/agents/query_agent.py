@@ -1,111 +1,61 @@
-from agents.base_agent import BaseAgent
-from typing import Dict, Any
-import openai
-import os
+from .base_agent import BaseAgent
+from tools import backend_bridge
 import json
 
-from utils.settings import OPENAI_API_KEY, QUERY_AGENT_MODEL
-from utils.logger import logger
-from utils.token_usage_tracker import track_tokens
-from utils.error_handling import handle_agent_error, ErrorSeverity, create_ai_service_error
-
-openai.api_key = OPENAI_API_KEY
-
-
 class QueryAgent(BaseAgent):
-    """
-    Translates user intent into an SQL/NoSQL query using GPT.
-    Leverages schema + DB type to create accurate, runnable queries.
-    """
+    def __init__(self, name: str, client, model: str):
+        super().__init__(name)
+        self.client = client
+        self.model = model
 
-    def run(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        try:
-            task = input_data.get("task", "")
-            schema = input_data.get("schema", {})
-            db_type = input_data.get("db_type", "postgres")
+    def run(self, task: dict) -> dict:
+        user_id = task.get("user_id")
+        db_info = task.get("db_info")
+        schema = task.get("schema")
+        message = task.get("message")
+        query = task.get("query")
 
-            if not task or not schema:
-                logger.warning("⚠️ QueryAgent missing task or schema input.")
-                return handle_agent_error(
-                    self.name(),
-                    ValueError("Missing task or schema input."),
-                    ErrorSeverity.MEDIUM
-                )
+        if not user_id or not db_info or not message:
+            return {"success": False, "error": "Missing user_id, db_info, or message."}
 
-            logger.info(f"🧠 QueryAgent building query for DB: {db_type}")
+        # Step 1: Generate query if not present
+        if not query:
+            if not schema:
+                return {"success": False, "error": "Missing schema to generate query."}
 
-            prompt = self._build_prompt(task, schema, db_type)
+            db_type = db_info.get("db_type", "sql").lower()
+            prompt = f"""
+You are a SQL generation AI for a {db_type.upper()} database.
+ONLY return raw SQL. Do NOT explain, format, or wrap in markdown.
+
+User: {message}
+Schema: {json.dumps(schema, indent=2)}
+"""
 
             try:
-                response = openai.ChatCompletion.create(
-                    model=QUERY_AGENT_MODEL,
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": f"You are a highly accurate database assistant. Generate only {db_type.upper()} queries."
-                        },
-                        {
-                            "role": "user",
-                            "content": prompt
-                        }
-                    ],
-                    temperature=0.2
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0,
+                    max_tokens=300
                 )
+                sql = response.choices[0].message.content.strip()
 
-                usage = response["usage"]
-                track_tokens("query_agent", QUERY_AGENT_MODEL,
-                            usage["prompt_tokens"], usage["completion_tokens"])
+                # Strip markdown/code blocks
+                sql = sql.replace("```sql", "").replace("```", "").strip()
 
-                query = response.choices[0].message.content.strip()
+                task["query"] = sql
+                print(f"[QueryAgent] Final SQL:\n{sql}")
 
-                if not query.lower().startswith("select") and "{" not in query:
-                    logger.warning("⚠️ GPT did not return a recognizable query.")
-                    return handle_agent_error(
-                        self.name(),
-                        ValueError("GPT returned unrecognizable query."),
-                        ErrorSeverity.MEDIUM
-                    )
+            except Exception as e:
+                return {"success": False, "error": f"Query generation failed: {str(e)}"}
 
-                logger.info(f"✅ QueryAgent generated query: {query[:100]}...")
-
-                return {
-                    "success": True,
-                    "query": query
-                }
-            except openai.error.OpenAIError as e:
-                # Specific handling for OpenAI API errors
-                logger.error(f"❌ OpenAI API error: {e}")
-                return create_ai_service_error(
-                    message=str(e),
-                    service="openai",
-                    model=QUERY_AGENT_MODEL,
-                    severity=ErrorSeverity.HIGH,
-                    source=self.name(),
-                    original_error=e
-                ).to_dict()
-
-        except Exception as e:
-            logger.exception("❌ QueryAgent encountered an error.")
-            return handle_agent_error(self.name(), e, ErrorSeverity.MEDIUM)
-
-    def _build_prompt(self, task: str, schema: Dict[str, Any], db_type: str) -> str:
-        tables = schema.get("tables", [])
-        columns = schema.get("columns", {})
-
+        # Step 2: Execute the query
         try:
-            schema_summary = "\n".join(
-                f"{table}:\n" + "\n".join([f"  - {col['name']} ({col['type']})" for col in cols])
-                for table, cols in columns.items()
-            )
+            result = backend_bridge.fetch_query_result(task["query"], db_info, user_id)
+            result["query"] = task["query"]
+            result["success"] = True
+            result["agentsCalled"] = ["query_agent"]
+            return result
         except Exception as e:
-            logger.error(f"❌ Failed to parse schema columns: {e}")
-            schema_summary = "[schema unavailable]"
-
-        return (
-            f"Task: {task}\n\n"
-            f"Database Type: {db_type.upper()}\n"
-            f"Tables: {', '.join(tables)}\n\n"
-            f"Schema:\n{schema_summary}\n\n"
-            f"Generate a single {db_type.upper()} query that answers the task. "
-            f"Return only the query and nothing else."
-        )
+            return {"success": False, "error": f"Query execution failed: {str(e)}"}

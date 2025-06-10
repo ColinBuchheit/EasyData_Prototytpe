@@ -1,6 +1,0 @@
-{
-  "dependencies": {
-    "crewai": "^1.0.1",
-    "fastapi": "^0.0.8"
-  }
-}
