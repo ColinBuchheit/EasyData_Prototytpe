@@ -19,11 +19,6 @@ BACKEND_SERVICE_ID = os.getenv("BACKEND_SERVICE_ID")
 AI_AGENT_ID = os.getenv("AI_AGENT_ID")
 AI_AGENT_VERSION = os.getenv("AI_AGENT_VERSION")
 
-def headers() -> dict:
-    return {
-        "Request-Secret": os.getenv("BACKEND_SECRET"),
-        "Content-Type": "application/json"
-    }
 
 
 def get_backend_token() -> str:
@@ -51,6 +46,7 @@ def get_backend_token() -> str:
 def headers() -> dict:
     return {
         "Authorization": f"Bearer {get_backend_token()}",
+        "Request-Secret": BACKEND_SECRET,
         "Content-Type": "application/json"
     }
 
